@@ -178,6 +178,7 @@ void Hwt101_SaveSettings(void)
     (void)Hwt101_Send(k_save);
 }
 
+/* USART2 错误后请求 DMA 接收恢复。 */
 void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
 {
     if (huart == &huart2)

@@ -19,16 +19,32 @@ typedef struct
 extern Hwt101Data hwt101_data;
 extern uint8_t hwt101_update_flag;
 
+/** 启动 HWT101 的循环 DMA 接收。 */
 HAL_StatusTypeDef Hwt101_Init(void);
+
+/** 解析 DMA 环形缓冲区中当前所有完整帧。 */
 void Hwt101_Process(void);
+
+/** 返回只读的 IMU 通信诊断信息。 */
 const volatile Hwt101Diagnostics *Hwt101_GetDiagnostics(void);
+
+/** 发送将偏航角归零的命令。 */
 void Hwt101_ZeroYaw(void);
+
+/** 解锁 HWT101 配置寄存器。 */
 void Hwt101_Unlock(void);
+
+/** 设置 HWT101 串口波特率为 115200。 */
 void Hwt101_SetBaud115200(void);
+
+/** 设置 HWT101 输出速率为 200 Hz。 */
 void Hwt101_SetOutput200Hz(void);
+
+/** 保存当前 HWT101 配置。 */
 void Hwt101_SaveSettings(void);
 
 typedef Hwt101Diagnostics IMU_Diagnostics;
+/* 旧版 IMU API 别名。 */
 #define imu                       hwt101_data
 #define mpu_flash                 hwt101_update_flag
 #define IMU_Receive_Init          Hwt101_Init

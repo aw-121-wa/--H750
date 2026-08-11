@@ -126,6 +126,7 @@ const volatile ZdtX42sDiagnostics *ZdtX42s_GetDiagnostics(void)
     return &s_diagnostics;
 }
 
+/* 解码一个电机回复并更新接收诊断信息。 */
 void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan,
                                uint32_t rx_fifo0_its)
 {
@@ -158,6 +159,7 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan,
     }
 }
 
+/* 记录控制器级 FDCAN 故障用于现场诊断。 */
 void HAL_FDCAN_ErrorCallback(FDCAN_HandleTypeDef *hfdcan)
 {
     if (hfdcan == s_fdcan)
@@ -167,6 +169,7 @@ void HAL_FDCAN_ErrorCallback(FDCAN_HandleTypeDef *hfdcan)
     }
 }
 
+/* 记录警告、被动和总线关闭状态通知。 */
 void HAL_FDCAN_ErrorStatusCallback(FDCAN_HandleTypeDef *hfdcan,
                                    uint32_t error_status_its)
 {

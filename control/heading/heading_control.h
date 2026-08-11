@@ -17,15 +17,29 @@ extern PidController heading_pid;
 
 #define HEADING_DRIFT_COMPENSATION_ENABLED 0U
 
+/** 初始化航向状态、PID 控制和 IMU 接收。 */
 HAL_StatusTypeDef Heading_Init(void);
+
+/** 转弯完成后更新航向参考。 */
 void Heading_Calibrate(int target_angle);
+
+/** 返回朝向目标角度的 PID 输出。 */
 float Heading_TurnOutput(float target_angle);
+
+/** 返回相对于参考角度的偏航角，范围 -180 到 180。 */
 float Heading_RelativeAngle(float yaw, float reference_angle);
+
+/** 返回当前 IMU 相对于参考的偏航角。 */
 float Heading_CurrentRelativeAngle(float reference_angle);
+
+/** 将角度归一化到 -180 到 180 范围内。 */
 float Heading_NormalizeAngle(float angle);
+
+/** 应用可选的航向漂移补偿。 */
 float Heading_CorrectDrift(float expected_current, float target_angle);
 
 typedef HeadingRunState IMU_RUNDATA;
+/* 旧版航向 API 别名。 */
 #define Imu_run                   heading_run
 #define Imu_turn                  heading_turn
 #define Gyro_Pid                  heading_pid

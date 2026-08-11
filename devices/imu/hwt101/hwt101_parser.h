@@ -25,11 +25,13 @@ typedef enum
     HWT101_PARSE_INVALID_ARGUMENT
 } Hwt101ParseResult;
 
+/** 验证并解码一帧 HWT101 数据到最新的 IMU 数据。 */
 Hwt101ParseResult Hwt101_ParseFrame(
     const uint8_t frame[HWT101_FRAME_SIZE], Hwt101Data *data);
 
 typedef Hwt101Data Imu;
 typedef Hwt101ParseResult IMU_ParseResult;
+/* 旧版解析器 API 别名。 */
 #define IMU_FRAME_SIZE              HWT101_FRAME_SIZE
 #define IMU_FRAME_HEADER            HWT101_FRAME_HEADER
 #define IMU_FRAME_ANGULAR_RATE      HWT101_FRAME_ANGULAR_RATE
