@@ -82,4 +82,4 @@ ctest --test-dir build/host-tests --output-on-failure
 
 ## 日志
 
-- 2026.8.11创建工程完成底盘编写并在wsl验证协议组包、底盘计算和驱动调用逻辑正确
+- 2026.8.11 完成四轮 CAN 底盘、ZDT X42S 协议、IMU 和基础测试；新增 WSL `vcan0` 验证程序，主机测试、Debug 构建和虚拟 CAN 抓包均通过。

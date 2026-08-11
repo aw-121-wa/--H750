@@ -17,6 +17,19 @@ if(BUILD_HOST_TESTS)
     return()
 endif()
 
+option(BUILD_VCAN_DEMO "Build Linux SocketCAN chassis demo instead of firmware" OFF)
+if(BUILD_VCAN_DEMO)
+    project(GongxunH750VcanDemo LANGUAGES C)
+    add_executable(chassis_vcan_demo
+        tools/chassis_vcan_demo.c
+        control/chassis/chassis_kinematics.c
+        devices/motor/zdt_x42s/zdt_x42s_protocol.c
+    )
+    target_include_directories(chassis_vcan_demo PRIVATE ${CMAKE_SOURCE_DIR})
+    target_compile_options(chassis_vcan_demo PRIVATE -Wall -Wextra -Werror)
+    return()
+endif()
+
 project(GongxunH750 LANGUAGES C ASM)
 message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
 
