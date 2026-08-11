@@ -1,0 +1,6 @@
+#ifndef APP_DIAGNOSTICS_CHASSIS_SMOKE_TEST_H
+#define APP_DIAGNOSTICS_CHASSIS_SMOKE_TEST_H
+
+void Chassis_SmokeTest(void);
+
+#endif
