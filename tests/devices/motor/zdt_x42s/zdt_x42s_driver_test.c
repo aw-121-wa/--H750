@@ -22,6 +22,12 @@ static HAL_StatusTypeDef fake_tx_status = HAL_OK;
 static HAL_StatusTypeDef fake_filter_status = HAL_OK;
 static FDCAN_RxHeaderTypeDef fake_rx_header;
 static uint8_t fake_rx_data[8];
+static uint32_t fake_tick;
+
+uint32_t HAL_GetTick(void)
+{
+    return fake_tick;
+}
 
 static void reset_fake(void)
 {
@@ -35,6 +41,7 @@ static void reset_fake(void)
     fake_filter_status = HAL_OK;
     memset(&fake_rx_header, 0, sizeof(fake_rx_header));
     memset(fake_rx_data, 0, sizeof(fake_rx_data));
+    fake_tick = 0U;
 }
 
 HAL_StatusTypeDef HAL_FDCAN_ConfigFilter(FDCAN_HandleTypeDef *hfdcan,
@@ -112,7 +119,7 @@ static void test_init_accepts_extended_frames_and_rejects_others(void)
     FDCAN_HandleTypeDef handle = {0};
 
     reset_fake();
-    assert(ZDT_X42S_CAN_Init(&handle) == HAL_OK);
+    assert(ZdtX42s_Init(&handle) == HAL_OK);
     assert(captured_filter.IdType == FDCAN_EXTENDED_ID);
     assert(captured_filter.FilterType == FDCAN_FILTER_MASK);
     assert(captured_filter.FilterID1 == 0U && captured_filter.FilterID2 == 0U);
@@ -123,18 +130,20 @@ static void test_init_accepts_extended_frames_and_rejects_others(void)
     assert((captured_notifications & FDCAN_IT_RX_FIFO0_NEW_MESSAGE) != 0U);
 }
 
-static void test_speed_command_uses_extended_id_and_seven_bytes(void)
+static void test_speed_command_uses_extended_id_and_x_firmware_layout(void)
 {
     FDCAN_HandleTypeDef handle = {0};
-    const uint8_t expected[] = {0xF6, 0x01, 0x04, 0xD2, 0x07, 0x01, 0x6B};
+    const uint8_t expected[] = {
+        0xF6, 0x01, 0x03, 0xE8, 0x04, 0xD2, 0x01, 0x6B
+    };
 
     reset_fake();
-    assert(ZDT_X42S_CAN_Init(&handle) == HAL_OK);
-    assert(ZDT_X42S_SetSpeedX10(3U, -1234, 7U, true) == HAL_OK);
+    assert(ZdtX42s_Init(&handle) == HAL_OK);
+    assert(ZdtX42s_SetSpeedX10(3U, -1234, 1000U, true) == HAL_OK);
     assert(captured_frame_count == 1U);
     assert(captured_frames[0].header.Identifier == 0x300U);
     assert(captured_frames[0].header.IdType == FDCAN_EXTENDED_ID);
-    assert(captured_frames[0].header.DataLength == FDCAN_DLC_BYTES_7);
+    assert(captured_frames[0].header.DataLength == FDCAN_DLC_BYTES_8);
     assert(memcmp(captured_frames[0].data, expected, sizeof(expected)) == 0);
 }
 
@@ -143,13 +152,13 @@ static void test_invalid_motor_id_and_fifo_capacity(void)
     FDCAN_HandleTypeDef handle = {0};
 
     reset_fake();
-    assert(ZDT_X42S_CAN_Init(&handle) == HAL_OK);
-    assert(ZDT_X42S_SetSpeedX10(0U, 100, 0U, true) == HAL_ERROR);
+    assert(ZdtX42s_Init(&handle) == HAL_OK);
+    assert(ZdtX42s_SetSpeedX10(0U, 100, 0U, true) == HAL_ERROR);
     assert(captured_frame_count == 0U);
     fake_free_level = 4U;
-    assert(!ZDT_X42S_HasTxCapacity(5U));
+    assert(!ZdtX42s_HasTxCapacity(5U));
     fake_free_level = 5U;
-    assert(ZDT_X42S_HasTxCapacity(5U));
+    assert(ZdtX42s_HasTxCapacity(5U));
 }
 
 static void test_failed_init_does_not_leave_driver_ready(void)
@@ -158,35 +167,35 @@ static void test_failed_init_does_not_leave_driver_ready(void)
 
     reset_fake();
     fake_filter_status = HAL_ERROR;
-    assert(ZDT_X42S_CAN_Init(&handle) == HAL_ERROR);
-    assert(!ZDT_X42S_HasTxCapacity(1U));
+    assert(ZdtX42s_Init(&handle) == HAL_ERROR);
+    assert(!ZdtX42s_HasTxCapacity(1U));
 }
 
 static void test_sync_command_and_diagnostics(void)
 {
     FDCAN_HandleTypeDef handle = {0};
-    const volatile ZDT_CanDiagnostics *diagnostics;
+    const volatile ZdtX42sDiagnostics *diagnostics;
 
     reset_fake();
-    assert(ZDT_X42S_CAN_Init(&handle) == HAL_OK);
-    assert(ZDT_X42S_Sync() == HAL_OK);
+    assert(ZdtX42s_Init(&handle) == HAL_OK);
+    assert(ZdtX42s_Sync() == HAL_OK);
     assert(captured_frames[0].header.Identifier == 0U);
     assert(captured_frames[0].header.DataLength == FDCAN_DLC_BYTES_3);
-    diagnostics = ZDT_X42S_GetDiagnostics();
+    diagnostics = ZdtX42s_GetDiagnostics();
     assert(diagnostics->tx_success_count == 1U);
 
     fake_tx_status = HAL_ERROR;
-    assert(ZDT_X42S_Sync() == HAL_ERROR);
+    assert(ZdtX42s_Sync() == HAL_ERROR);
     assert(diagnostics->tx_failure_count == 1U);
 }
 
 static void test_rx_callback_records_motor_reply(void)
 {
     FDCAN_HandleTypeDef handle = {0};
-    const volatile ZDT_CanDiagnostics *diagnostics;
+    const volatile ZdtX42sDiagnostics *diagnostics;
 
     reset_fake();
-    assert(ZDT_X42S_CAN_Init(&handle) == HAL_OK);
+    assert(ZdtX42s_Init(&handle) == HAL_OK);
     fake_rx_header.Identifier = 0x200U;
     fake_rx_header.IdType = FDCAN_EXTENDED_ID;
     fake_rx_header.DataLength = FDCAN_DLC_BYTES_3;
@@ -195,7 +204,7 @@ static void test_rx_callback_records_motor_reply(void)
     fake_rx_data[2] = 0x6BU;
 
     HAL_FDCAN_RxFifo0Callback(&handle, FDCAN_IT_RX_FIFO0_NEW_MESSAGE);
-    diagnostics = ZDT_X42S_GetDiagnostics();
+    diagnostics = ZdtX42s_GetDiagnostics();
     assert(diagnostics->rx_frame_count == 1U);
     assert(diagnostics->last_rx_id == 0x200U);
     assert(diagnostics->last_function == 0xF6U);
@@ -203,14 +212,48 @@ static void test_rx_callback_records_motor_reply(void)
     assert(diagnostics->motor_reply_count[1] == 1U);
 }
 
+static void test_position_request_and_reply(void)
+{
+    FDCAN_HandleTypeDef handle = {0};
+    int32_t position = 0;
+    uint32_t age = 0U;
+
+    reset_fake();
+    assert(ZdtX42s_Init(&handle) == HAL_OK);
+    assert(ZdtX42s_RequestPosition(4U) == HAL_OK);
+    assert(captured_frames[0].header.Identifier == 0x400U);
+    assert(captured_frames[0].header.DataLength == FDCAN_DLC_BYTES_2);
+    assert(captured_frames[0].data[0] == 0x36U);
+    assert(captured_frames[0].data[1] == 0x6BU);
+
+    fake_tick = 125U;
+    fake_rx_header.Identifier = 0x400U;
+    fake_rx_header.IdType = FDCAN_EXTENDED_ID;
+    fake_rx_header.DataLength = FDCAN_DLC_BYTES_7;
+    fake_rx_data[0] = 0x36U;
+    fake_rx_data[1] = 0x01U;
+    fake_rx_data[2] = 0x00U;
+    fake_rx_data[3] = 0x00U;
+    fake_rx_data[4] = 0x1CU;
+    fake_rx_data[5] = 0x19U;
+    fake_rx_data[6] = 0x6BU;
+    HAL_FDCAN_RxFifo0Callback(&handle, FDCAN_IT_RX_FIFO0_NEW_MESSAGE);
+
+    fake_tick = 150U;
+    assert(ZdtX42s_GetPosition(4U, &position, &age));
+    assert(position == -7193);
+    assert(age == 25U);
+}
+
 int main(void)
 {
     test_init_accepts_extended_frames_and_rejects_others();
-    test_speed_command_uses_extended_id_and_seven_bytes();
+    test_speed_command_uses_extended_id_and_x_firmware_layout();
     test_invalid_motor_id_and_fifo_capacity();
     test_failed_init_does_not_leave_driver_ready();
     test_sync_command_and_diagnostics();
     test_rx_callback_records_motor_reply();
+    test_position_request_and_reply();
     puts("ZDT CAN driver tests passed");
     return 0;
 }

@@ -16,6 +16,11 @@ typedef enum
 
 typedef struct
 {
+    uint32_t ErrorCode;
+} UART_HandleTypeDef;
+
+typedef struct
+{
     volatile uint32_t CTRL;
     volatile uint32_t CYCCNT;
     volatile uint32_t LAR;

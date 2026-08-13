@@ -56,7 +56,9 @@ typedef struct
 #define FDCAN_EXTENDED_ID                 1U
 #define FDCAN_DATA_FRAME                  2U
 #define FDCAN_DLC_BYTES_3                 3U
+#define FDCAN_DLC_BYTES_2                 2U
 #define FDCAN_DLC_BYTES_7                 7U
+#define FDCAN_DLC_BYTES_8                 8U
 #define FDCAN_ESI_ACTIVE                  4U
 #define FDCAN_BRS_OFF                     5U
 #define FDCAN_CLASSIC_CAN                 6U
@@ -70,6 +72,8 @@ typedef struct
 #define FDCAN_IT_BUS_OFF                  (1UL << 1)
 #define FDCAN_IT_ERROR_WARNING            (1UL << 2)
 #define FDCAN_IT_ERROR_PASSIVE            (1UL << 3)
+
+uint32_t HAL_GetTick(void);
 
 HAL_StatusTypeDef HAL_FDCAN_ConfigFilter(FDCAN_HandleTypeDef *hfdcan,
                                          FDCAN_FilterTypeDef *filter);

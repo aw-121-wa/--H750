@@ -17,19 +17,6 @@ if(BUILD_HOST_TESTS)
     return()
 endif()
 
-option(BUILD_VCAN_DEMO "Build Linux SocketCAN chassis demo instead of firmware" OFF)
-if(BUILD_VCAN_DEMO)
-    project(GongxunH750VcanDemo LANGUAGES C)
-    add_executable(chassis_vcan_demo
-        tools/chassis_vcan_demo.c
-        control/chassis/chassis_kinematics.c
-        devices/motor/zdt_x42s/zdt_x42s_protocol.c
-    )
-    target_include_directories(chassis_vcan_demo PRIVATE ${CMAKE_SOURCE_DIR})
-    target_compile_options(chassis_vcan_demo PRIVATE -Wall -Wextra -Werror)
-    return()
-endif()
-
 project(GongxunH750 LANGUAGES C ASM)
 message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
 
@@ -37,15 +24,21 @@ add_executable(${PROJECT_NAME})
 add_subdirectory(cmake/stm32cubemx)
 
 target_sources(${PROJECT_NAME} PRIVATE
-    app/diagnostics/chassis_smoke_test.c
     control/chassis/chassis.c
     control/chassis/chassis_kinematics.c
     control/common/pid.c
     control/heading/heading_control.c
+    control/localization/localization.c
+    control/localization/localization_service.c
+    control/navigation/navigation.c
     devices/imu/hwt101/hwt101.c
     devices/imu/hwt101/hwt101_parser.c
     devices/motor/zdt_x42s/zdt_x42s.c
     devices/motor/zdt_x42s/zdt_x42s_protocol.c
+    platform/communication/host_link.c
+    platform/communication/host_dispatcher.c
+    platform/communication/host_protocol.c
+    platform/communication/uart_callbacks.c
     platform/time/delay.c
     platform/time/dwt_delay.c
 )

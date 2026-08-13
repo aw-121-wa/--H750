@@ -9,31 +9,37 @@
 
 static void test_extended_id_mapping(void)
 {
-    assert(ZDT_X42S_CommandId(1U, 0U) == 0x100U);
-    assert(ZDT_X42S_CommandId(4U, 0U) == 0x400U);
-    assert(ZDT_X42S_CommandId(4U, 1U) == 0x401U);
+    assert(ZdtX42s_CommandId(1U, 0U) == 0x100U);
+    assert(ZdtX42s_CommandId(4U, 0U) == 0x400U);
+    assert(ZdtX42s_CommandId(4U, 1U) == 0x401U);
 }
 
 static void test_speed_payload_direction_and_magnitude(void)
 {
     uint8_t payload[ZDT_X42S_CAN_MAX_DATA_LENGTH] = {0};
-    const uint8_t expected_positive[] = {0xF6, 0x00, 0x04, 0xD2, 0x07, 0x01, 0x6B};
-    const uint8_t expected_negative[] = {0xF6, 0x01, 0x04, 0xD2, 0x07, 0x00, 0x6B};
+    const uint8_t expected_positive[] = {
+        0xF6, 0x00, 0x03, 0xE8, 0x04, 0xD2, 0x01, 0x6B
+    };
+    const uint8_t expected_negative[] = {
+        0xF6, 0x01, 0x03, 0xE8, 0x04, 0xD2, 0x00, 0x6B
+    };
 
-    assert(ZDT_X42S_BuildSpeedPayload(1234, 7U, true, payload) == 7U);
+    assert(ZdtX42s_BuildSpeedPayload(1234, 1000U, true, payload) == 8U);
     assert(memcmp(payload, expected_positive, sizeof(expected_positive)) == 0);
 
     memset(payload, 0, sizeof(payload));
-    assert(ZDT_X42S_BuildSpeedPayload(-1234, 7U, false, payload) == 7U);
+    assert(ZdtX42s_BuildSpeedPayload(-1234, 1000U, false, payload) == 8U);
     assert(memcmp(payload, expected_negative, sizeof(expected_negative)) == 0);
 }
 
 static void test_speed_payload_handles_int16_min(void)
 {
     uint8_t payload[ZDT_X42S_CAN_MAX_DATA_LENGTH] = {0};
-    const uint8_t expected[] = {0xF6, 0x01, 0x80, 0x00, 0x00, 0x01, 0x6B};
+    const uint8_t expected[] = {
+        0xF6, 0x01, 0x00, 0x00, 0x80, 0x00, 0x01, 0x6B
+    };
 
-    assert(ZDT_X42S_BuildSpeedPayload(INT16_MIN, 0U, true, payload) == 7U);
+    assert(ZdtX42s_BuildSpeedPayload(INT16_MIN, 0U, true, payload) == 8U);
     assert(memcmp(payload, expected, sizeof(expected)) == 0);
 }
 
@@ -42,7 +48,7 @@ static void test_sync_payload(void)
     uint8_t payload[ZDT_X42S_CAN_MAX_DATA_LENGTH] = {0};
     const uint8_t expected[] = {0xFF, 0x66, 0x6B};
 
-    assert(ZDT_X42S_BuildSyncPayload(payload) == 3U);
+    assert(ZdtX42s_BuildSyncPayload(payload) == 3U);
     assert(memcmp(payload, expected, sizeof(expected)) == 0);
 }
 

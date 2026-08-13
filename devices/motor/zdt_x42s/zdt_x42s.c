@@ -7,6 +7,15 @@
 static FDCAN_HandleTypeDef *s_fdcan;
 static volatile ZdtX42sDiagnostics s_diagnostics;
 
+typedef struct
+{
+    int32_t position_x10_deg;
+    uint32_t timestamp_ms;
+    bool valid;
+} ZdtX42sPositionSample;
+
+static volatile ZdtX42sPositionSample s_positions[ZDT_X42S_MOTOR_COUNT];
+
 static HAL_StatusTypeDef ZdtX42s_Send(
     uint32_t identifier,
     uint32_t data_length,
@@ -57,6 +66,7 @@ HAL_StatusTypeDef ZdtX42s_Init(FDCAN_HandleTypeDef *hfdcan)
     }
 
     memset((void *)&s_diagnostics, 0, sizeof(s_diagnostics));
+    memset((void *)s_positions, 0, sizeof(s_positions));
     s_fdcan = NULL;
 
     filter.IdType = FDCAN_EXTENDED_ID;
@@ -88,20 +98,20 @@ HAL_StatusTypeDef ZdtX42s_Init(FDCAN_HandleTypeDef *hfdcan)
 
 HAL_StatusTypeDef ZdtX42s_SetSpeedX10(uint8_t motor_id,
                                      int16_t rpm_x10,
-                                     uint8_t acceleration,
+                                     uint16_t acceleration_rpm_s,
                                      bool synchronized)
 {
     uint8_t payload[ZDT_X42S_CAN_MAX_DATA_LENGTH] = {0};
 
     if (motor_id == 0U ||
-        ZdtX42s_BuildSpeedPayload(rpm_x10, acceleration,
+        ZdtX42s_BuildSpeedPayload(rpm_x10, acceleration_rpm_s,
                                   synchronized, payload) == 0U)
     {
         return HAL_ERROR;
     }
 
     return ZdtX42s_Send(ZdtX42s_CommandId(motor_id, 0U),
-                        FDCAN_DLC_BYTES_7, payload);
+                        FDCAN_DLC_BYTES_8, payload);
 }
 
 HAL_StatusTypeDef ZdtX42s_Sync(void)
@@ -113,6 +123,36 @@ HAL_StatusTypeDef ZdtX42s_Sync(void)
         return HAL_ERROR;
     }
     return ZdtX42s_Send(0U, FDCAN_DLC_BYTES_3, payload);
+}
+
+HAL_StatusTypeDef ZdtX42s_RequestPosition(uint8_t motor_id)
+{
+    uint8_t payload[ZDT_X42S_CAN_MAX_DATA_LENGTH] = {0x36U, 0x6BU};
+
+    if (motor_id == 0U || motor_id > ZDT_X42S_MOTOR_COUNT)
+    {
+        return HAL_ERROR;
+    }
+    return ZdtX42s_Send(ZdtX42s_CommandId(motor_id, 0U),
+                        FDCAN_DLC_BYTES_2, payload);
+}
+
+bool ZdtX42s_GetPosition(uint8_t motor_id,
+                         int32_t *position_x10_deg,
+                         uint32_t *age_ms)
+{
+    uint32_t timestamp;
+
+    if (motor_id == 0U || motor_id > ZDT_X42S_MOTOR_COUNT ||
+        position_x10_deg == NULL || age_ms == NULL ||
+        !s_positions[motor_id - 1U].valid)
+    {
+        return false;
+    }
+    *position_x10_deg = s_positions[motor_id - 1U].position_x10_deg;
+    timestamp = s_positions[motor_id - 1U].timestamp_ms;
+    *age_ms = HAL_GetTick() - timestamp;
+    return true;
 }
 
 bool ZdtX42s_HasTxCapacity(uint32_t frame_count)
@@ -156,6 +196,20 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan,
         motor_id >= 1U && motor_id <= ZDT_X42S_MOTOR_COUNT)
     {
         s_diagnostics.motor_reply_count[motor_id - 1U]++;
+        if (data[0] == 0x36U && header.DataLength == FDCAN_DLC_BYTES_7 &&
+            data[6] == 0x6BU)
+        {
+            uint32_t magnitude = ((uint32_t)data[2] << 24U) |
+                                 ((uint32_t)data[3] << 16U) |
+                                 ((uint32_t)data[4] << 8U) |
+                                 (uint32_t)data[5];
+            int32_t position = (int32_t)magnitude;
+
+            s_positions[motor_id - 1U].position_x10_deg =
+                data[1] == 0x01U ? -position : position;
+            s_positions[motor_id - 1U].timestamp_ms = HAL_GetTick();
+            s_positions[motor_id - 1U].valid = true;
+        }
     }
 }
 

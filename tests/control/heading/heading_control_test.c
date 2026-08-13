@@ -28,9 +28,10 @@ HAL_StatusTypeDef Chassis_SetSpeed(float vy, float vx, float vw, bool fine)
     return HAL_OK;
 }
 
-void Motor_Stop(void)
+HAL_StatusTypeDef Chassis_Stop(void)
 {
     stop_count++;
+    return HAL_OK;
 }
 
 static void reset_fake(void)

@@ -52,6 +52,13 @@ float Heading_CurrentRelativeAngle(float reference_angle)
 float Heading_TurnOutput(float target_angle)
 {
     const float current = Heading_NormalizeAngle(hwt101_data.yaw);
+
+    return Heading_TurnOutputForPose(target_angle, current);
+}
+
+float Heading_TurnOutputForPose(float target_angle, float current_angle)
+{
+    const float current = Heading_NormalizeAngle(current_angle);
     const float nearest_target = current +
         Heading_NormalizeAngle(target_angle - current);
 
@@ -65,7 +72,7 @@ void Heading_Calibrate(int target_angle)
 
     if (Heading_Abs(error) <= HEADING_TOLERANCE)
     {
-        Motor_Stop();
+        (void)Chassis_Stop();
         return;
     }
     (void)Chassis_SetSpeed(0.0f, 0.0f,

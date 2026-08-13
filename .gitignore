@@ -1,3 +1,9 @@
 build
 mx.scratch
 !.settings
+host/map-console/node_modules
+host/map-console/dist
+host/map-console/*.tsbuildinfo
+host/map-console/vite.config.js
+host/map-console/vite.config.d.ts
+host/map-console/vite.*.log

@@ -133,6 +133,8 @@ void Hwt101_Process(void)
             if (frame[1] == HWT101_FRAME_ANGLE)
             {
                 hwt101_update_flag = (uint8_t)~hwt101_update_flag;
+                s_diagnostics.angle_frame_count++;
+                s_diagnostics.last_angle_frame_ms = HAL_GetTick();
             }
         }
         else
@@ -147,6 +149,7 @@ void Hwt101_Process(void)
     }
 }
 
+/*只读诊断结构体*/
 const volatile Hwt101Diagnostics *Hwt101_GetDiagnostics(void)
 {
     return &s_diagnostics;
@@ -179,7 +182,7 @@ void Hwt101_SaveSettings(void)
 }
 
 /* USART2 错误后请求 DMA 接收恢复。 */
-void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
+void Hwt101_OnUartError(UART_HandleTypeDef *huart)
 {
     if (huart == &huart2)
     {

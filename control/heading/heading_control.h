@@ -26,6 +26,9 @@ void Heading_Calibrate(int target_angle);
 /** 返回朝向目标角度的 PID 输出。 */
 float Heading_TurnOutput(float target_angle);
 
+/** Returns turn output using a caller-supplied map-frame heading. */
+float Heading_TurnOutputForPose(float target_angle, float current_angle);
+
 /** 返回相对于参考角度的偏航角，范围 -180 到 180。 */
 float Heading_RelativeAngle(float yaw, float reference_angle);
 

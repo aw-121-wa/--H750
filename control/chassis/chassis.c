@@ -1,11 +1,13 @@
 #include "control/chassis/chassis.h"
 
+#include <stddef.h>
+
 #include "control/chassis/chassis_kinematics.h"
 #include "devices/motor/zdt_x42s/zdt_x42s.h"
 #include "fdcan.h"
 
 #define CHASSIS_BATCH_FRAME_COUNT 5U
-#define CHASSIS_ACCELERATION      0U
+#define CHASSIS_ACCELERATION_RPM_S 1000U
 
 HAL_StatusTypeDef Chassis_Init(void)
 {
@@ -30,7 +32,7 @@ HAL_StatusTypeDef Chassis_SetWheelSpeedX10(
     for (uint8_t i = 0U; i < CHASSIS_WHEEL_COUNT; ++i)
     {
         HAL_StatusTypeDef status = ZdtX42s_SetSpeedX10(
-            i + 1U, rpm_x10[i], CHASSIS_ACCELERATION, true);
+            i + 1U, rpm_x10[i], CHASSIS_ACCELERATION_RPM_S, true);
         if (status != HAL_OK)
         {
             return status;
@@ -52,17 +54,7 @@ HAL_StatusTypeDef Chassis_SetSpeed(float vy, float vx, float vw, bool fine)
     return Chassis_SetWheelSpeedX10(wheel_rpm_x10);
 }
 
-void Motor_setspeed(float vy, float vx, float vw)
+HAL_StatusTypeDef Chassis_Stop(void)
 {
-    (void)Chassis_SetSpeed(vy, vx, vw, false);
-}
-
-void Motor_setspeed_fine(float vy, float vx, float vw)
-{
-    (void)Chassis_SetSpeed(vy, vx, vw, true);
-}
-
-void Motor_Stop(void)
-{
-    (void)Chassis_SetSpeed(0.0f, 0.0f, 0.0f, false);
+    return Chassis_SetSpeed(0.0f, 0.0f, 0.0f, false);
 }

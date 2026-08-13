@@ -8,12 +8,14 @@
 
 typedef struct
 {
-    uint32_t valid_frame_count;
-    uint32_t discarded_byte_count;
-    uint32_t checksum_error_count;
-    uint32_t uart_error_count;
-    uint32_t dma_restart_count;
-    uint32_t last_uart_error;
+    uint32_t valid_frame_count;/*< 有效帧计数 >若是IMU没数据，如果该值为0则DMA未启动或接线断开*/
+    uint32_t discarded_byte_count;/*< 被丢弃的字节计数 >如果数据偶尔断开且该值持续增长大概率波特率不匹配*/
+    uint32_t checksum_error_count;/*< 校验错误计数 >*如果该值增长则数据可能有误应该是磁场干扰或者是波特率未对齐*/
+    uint32_t uart_error_count;/*< 串口错误计数 >若突然没数据且uart_error_count 非零 + dma_restart_count 增长则硬件误触发DMA重启*/
+    uint32_t dma_restart_count;/*< DMA 重启计数 >*/
+    uint32_t last_uart_error;/*< 最后一次串口错误 >*/
+    uint32_t angle_frame_count;/*< 角度帧计数 >*/
+    uint32_t last_angle_frame_ms;/*< 最后一次角度帧时间 >*/
 } Hwt101Diagnostics;
 
 extern Hwt101Data hwt101_data;
@@ -24,6 +26,9 @@ HAL_StatusTypeDef Hwt101_Init(void);
 
 /** 解析 DMA 环形缓冲区中当前所有完整帧。 */
 void Hwt101_Process(void);
+
+/** Handles USART2 errors through the shared HAL callback router. */
+void Hwt101_OnUartError(UART_HandleTypeDef *huart);
 
 /** 返回只读的 IMU 通信诊断信息。 */
 const volatile Hwt101Diagnostics *Hwt101_GetDiagnostics(void);

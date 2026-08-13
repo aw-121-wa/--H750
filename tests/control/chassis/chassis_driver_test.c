@@ -13,7 +13,7 @@ typedef struct
 {
     uint8_t motor_id;
     int16_t rpm_x10;
-    uint8_t acceleration;
+    uint16_t acceleration_rpm_s;
     bool synchronized;
 } CapturedSpeed;
 
@@ -34,22 +34,22 @@ static void reset_fake(void)
     can_init_count = 0U;
 }
 
-HAL_StatusTypeDef ZDT_X42S_CAN_Init(FDCAN_HandleTypeDef *hfdcan)
+HAL_StatusTypeDef ZdtX42s_Init(FDCAN_HandleTypeDef *hfdcan)
 {
     assert(hfdcan == &hfdcan1);
     can_init_count++;
     return HAL_OK;
 }
 
-bool ZDT_X42S_HasTxCapacity(uint32_t frame_count)
+bool ZdtX42s_HasTxCapacity(uint32_t frame_count)
 {
     assert(frame_count == 5U);
     return fake_capacity;
 }
 
-HAL_StatusTypeDef ZDT_X42S_SetSpeedX10(uint8_t motor_id,
+HAL_StatusTypeDef ZdtX42s_SetSpeedX10(uint8_t motor_id,
                                       int16_t rpm_x10,
-                                      uint8_t acceleration,
+                                      uint16_t acceleration_rpm_s,
                                       bool synchronized)
 {
     const size_t call_number = captured_speed_count + 1U;
@@ -59,12 +59,12 @@ HAL_StatusTypeDef ZDT_X42S_SetSpeedX10(uint8_t motor_id,
         return HAL_ERROR;
     }
     captured_speed[captured_speed_count++] = (CapturedSpeed){
-        motor_id, rpm_x10, acceleration, synchronized
+        motor_id, rpm_x10, acceleration_rpm_s, synchronized
     };
     return HAL_OK;
 }
 
-HAL_StatusTypeDef ZDT_X42S_Sync(void)
+HAL_StatusTypeDef ZdtX42s_Sync(void)
 {
     sync_count++;
     return HAL_OK;
@@ -81,6 +81,7 @@ static void test_init_starts_can_and_sends_zero_speed(void)
     {
         assert(captured_speed[i].motor_id == i + 1U);
         assert(captured_speed[i].rpm_x10 == 0);
+        assert(captured_speed[i].acceleration_rpm_s == 1000U);
         assert(captured_speed[i].synchronized);
     }
 }

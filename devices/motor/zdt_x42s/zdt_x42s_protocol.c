@@ -7,7 +7,7 @@ uint32_t ZdtX42s_CommandId(uint8_t motor_id, uint8_t packet_index)
 
 size_t ZdtX42s_BuildSpeedPayload(
     int16_t rpm_x10,
-    uint8_t acceleration,
+    uint16_t acceleration_rpm_s,
     bool synchronized,
     uint8_t payload[ZDT_X42S_CAN_MAX_DATA_LENGTH])
 {
@@ -30,13 +30,13 @@ size_t ZdtX42s_BuildSpeedPayload(
     }
 
     payload[0] = 0xF6U;
-    payload[2] = (uint8_t)(magnitude >> 8U);
-    payload[3] = (uint8_t)magnitude;
-    payload[4] = acceleration;
-    payload[5] = synchronized ? 0x01U : 0x00U;
-    payload[6] = 0x6BU;
-    payload[7] = 0x00U;
-    return 7U;
+    payload[2] = (uint8_t)(acceleration_rpm_s >> 8U);
+    payload[3] = (uint8_t)acceleration_rpm_s;
+    payload[4] = (uint8_t)(magnitude >> 8U);
+    payload[5] = (uint8_t)magnitude;
+    payload[6] = synchronized ? 0x01U : 0x00U;
+    payload[7] = 0x6BU;
+    return 8U;
 }
 
 size_t ZdtX42s_BuildSyncPayload(
