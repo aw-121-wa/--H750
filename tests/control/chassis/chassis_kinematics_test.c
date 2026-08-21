@@ -79,6 +79,18 @@ static void test_rpm_encoding_and_clamping(void)
     assert(Chassis_EncodeRpmX10(-500.0f, true) == -3000);
 }
 
+static void test_wheel_speed_normalization_preserves_ratio(void)
+{
+    float wheel_rpm[CHASSIS_WHEEL_COUNT] = {400.0f, 200.0f,
+                                            100.0f, 300.0f};
+
+    Chassis_NormalizeWheelRpm(wheel_rpm);
+    assert(wheel_rpm[0] == 300.0f);
+    assert(wheel_rpm[1] == 150.0f);
+    assert(wheel_rpm[2] == 75.0f);
+    assert(wheel_rpm[3] == 225.0f);
+}
+
 int main(void)
 {
     test_extended_id_mapping();
@@ -87,6 +99,7 @@ int main(void)
     test_sync_payload();
     test_chassis_wheel_mapping();
     test_rpm_encoding_and_clamping();
+    test_wheel_speed_normalization_preserves_ratio();
     puts("chassis protocol tests passed");
     return 0;
 }

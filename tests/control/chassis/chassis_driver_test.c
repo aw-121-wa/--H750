@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -132,12 +133,28 @@ static void test_partial_failure_does_not_trigger_sync(void)
     assert(sync_count == 0U);
 }
 
+static void test_non_finite_speed_is_rejected_before_can_enqueue(void)
+{
+    reset_fake();
+    assert(Chassis_SetSpeed(NAN, 0.0f, 0.0f, true) == HAL_ERROR);
+    assert(captured_speed_count == 0U);
+
+    reset_fake();
+    assert(Chassis_SetSpeed(0.0f, INFINITY, 0.0f, true) == HAL_ERROR);
+    assert(captured_speed_count == 0U);
+
+    reset_fake();
+    assert(Chassis_SetSpeed(0.0f, 0.0f, -INFINITY, true) == HAL_ERROR);
+    assert(captured_speed_count == 0U);
+}
+
 int main(void)
 {
     test_init_starts_can_and_sends_zero_speed();
     test_chassis_set_speed_maps_forward_left_and_rotation();
     test_fifo_shortage_sends_nothing();
     test_partial_failure_does_not_trigger_sync();
+    test_non_finite_speed_is_rejected_before_can_enqueue();
     puts("chassis driver tests passed");
     return 0;
 }

@@ -1,5 +1,6 @@
 #include "control/chassis/chassis.h"
 
+#include <math.h>
 #include <stddef.h>
 
 #include "control/chassis/chassis_kinematics.h"
@@ -46,7 +47,12 @@ HAL_StatusTypeDef Chassis_SetSpeed(float vy, float vx, float vw, bool fine)
     float wheel_rpm[CHASSIS_WHEEL_COUNT];
     int16_t wheel_rpm_x10[CHASSIS_WHEEL_COUNT];
 
+    if (!isfinite(vy) || !isfinite(vx) || !isfinite(vw))
+    {
+        return HAL_ERROR;
+    }
     Chassis_CalculateWheelRpm(vy, vx, vw, wheel_rpm);
+    Chassis_NormalizeWheelRpm(wheel_rpm);
     for (uint8_t i = 0U; i < CHASSIS_WHEEL_COUNT; ++i)
     {
         wheel_rpm_x10[i] = Chassis_EncodeRpmX10(wheel_rpm[i], fine);
