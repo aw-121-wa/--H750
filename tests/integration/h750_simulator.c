@@ -30,6 +30,7 @@ static SimCanFrame s_can_frames[SIM_CAN_CAPACITY];
 static size_t s_can_count;
 static FDCAN_RxHeaderTypeDef s_rx_header;
 static uint8_t s_rx_data[8];
+static bool s_rx_pending;
 static uint64_t s_start_ms;
 static uint32_t s_last_pose_ms;
 static uint32_t s_last_nav_tick_ms;
@@ -78,6 +79,21 @@ HAL_StatusTypeDef HAL_FDCAN_Start(FDCAN_HandleTypeDef *hfdcan)
     return HAL_OK;
 }
 
+HAL_StatusTypeDef HAL_FDCAN_Stop(FDCAN_HandleTypeDef *hfdcan)
+{
+    (void)hfdcan;
+    return HAL_OK;
+}
+
+HAL_StatusTypeDef HAL_FDCAN_GetProtocolStatus(
+    const FDCAN_HandleTypeDef *hfdcan,
+    FDCAN_ProtocolStatusTypeDef *status)
+{
+    (void)hfdcan;
+    memset(status, 0, sizeof(*status));
+    return HAL_OK;
+}
+
 HAL_StatusTypeDef HAL_FDCAN_ActivateNotification(FDCAN_HandleTypeDef *hfdcan,
                                                  uint32_t notifications,
                                                  uint32_t buffer_indexes)
@@ -118,9 +134,18 @@ HAL_StatusTypeDef HAL_FDCAN_GetRxMessage(FDCAN_HandleTypeDef *hfdcan,
 {
     (void)hfdcan;
     (void)fifo;
+    s_rx_pending = false;
     *header = s_rx_header;
     memcpy(data, s_rx_data, sizeof(s_rx_data));
     return HAL_OK;
+}
+
+uint32_t HAL_FDCAN_GetRxFifoFillLevel(const FDCAN_HandleTypeDef *hfdcan,
+                                      uint32_t fifo)
+{
+    (void)hfdcan;
+    (void)fifo;
+    return s_rx_pending ? 1U : 0U;
 }
 
 NavigationPose Localization_GetPose(void)
@@ -274,8 +299,10 @@ static void InjectPosition(uint8_t motor_id, int32_t position_x10_deg)
 
     memset(&s_rx_header, 0, sizeof(s_rx_header));
     memset(s_rx_data, 0, sizeof(s_rx_data));
+    s_rx_pending = true;
     s_rx_header.Identifier = (uint32_t)motor_id << 8U;
     s_rx_header.IdType = FDCAN_EXTENDED_ID;
+    s_rx_header.RxFrameType = FDCAN_DATA_FRAME;
     s_rx_header.DataLength = FDCAN_DLC_BYTES_7;
     s_rx_data[0] = 0x36U;
     s_rx_data[1] = position_x10_deg < 0 ? 0x01U : 0x00U;
