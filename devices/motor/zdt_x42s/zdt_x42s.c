@@ -7,7 +7,26 @@
 static FDCAN_HandleTypeDef *s_fdcan;
 static volatile ZdtX42sDiagnostics s_diagnostics;
 
-static volatile ZdtX42sPositionSample s_positions[ZDT_X42S_MOTOR_COUNT];
+typedef struct
+{
+    volatile uint32_t write_guard;
+    volatile ZdtX42sPositionSample sample;
+} ZdtX42sPositionSlot;
+
+static volatile ZdtX42sPositionSlot s_positions[ZDT_X42S_MOTOR_COUNT];
+
+#ifdef ZDT_X42S_TEST_HOOKS
+extern void ZdtX42s_TestPositionReadHook(void);
+#endif
+
+static void ZdtX42s_MemoryBarrier(void)
+{
+#if defined(__DMB)
+    __DMB();
+#else
+    __atomic_thread_fence(__ATOMIC_SEQ_CST);
+#endif
+}
 
 static HAL_StatusTypeDef ZdtX42s_Send(
     uint32_t identifier,
@@ -131,33 +150,55 @@ HAL_StatusTypeDef ZdtX42s_RequestPosition(uint8_t motor_id)
 }
 
 bool ZdtX42s_GetPosition(uint8_t motor_id,
-                         int32_t *position_x10_deg,
-                         uint32_t *age_ms)
+                          int32_t *position_x10_deg,
+                          uint32_t *age_ms)
 {
-    uint32_t timestamp;
+    ZdtX42sPositionSample sample;
 
     if (motor_id == 0U || motor_id > ZDT_X42S_MOTOR_COUNT ||
         position_x10_deg == NULL || age_ms == NULL ||
-        !s_positions[motor_id - 1U].valid)
+        !ZdtX42s_GetPositionSample(motor_id, &sample))
     {
         return false;
     }
-    *position_x10_deg = s_positions[motor_id - 1U].position_x10_deg;
-    timestamp = s_positions[motor_id - 1U].timestamp_ms;
-    *age_ms = HAL_GetTick() - timestamp;
+    *position_x10_deg = sample.position_x10_deg;
+    *age_ms = HAL_GetTick() - sample.timestamp_ms;
     return true;
 }
 
 bool ZdtX42s_GetPositionSample(uint8_t motor_id,
                                ZdtX42sPositionSample *sample)
 {
+    volatile ZdtX42sPositionSlot *slot;
+    uint32_t guard_before;
+    uint32_t guard_after;
+
     if (motor_id == 0U || motor_id > ZDT_X42S_MOTOR_COUNT || sample == NULL ||
-        !s_positions[motor_id - 1U].valid)
+        !s_positions[motor_id - 1U].sample.valid)
     {
         return false;
     }
-    *sample = s_positions[motor_id - 1U];
-    return true;
+    slot = &s_positions[motor_id - 1U];
+    do
+    {
+        guard_before = slot->write_guard;
+        if ((guard_before & 1U) != 0U)
+        {
+            continue;
+        }
+        ZdtX42s_MemoryBarrier();
+#ifdef ZDT_X42S_TEST_HOOKS
+        ZdtX42s_TestPositionReadHook();
+#endif
+        sample->position_x10_deg = slot->sample.position_x10_deg;
+        sample->timestamp_ms = slot->sample.timestamp_ms;
+        sample->sequence = slot->sample.sequence;
+        sample->valid = slot->sample.valid;
+        ZdtX42s_MemoryBarrier();
+        guard_after = slot->write_guard;
+    } while (guard_before != guard_after ||
+             (guard_after & 1U) != 0U);
+    return sample->valid;
 }
 
 bool ZdtX42s_HasTxCapacity(uint32_t frame_count)
@@ -210,11 +251,15 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan,
                                  (uint32_t)data[5];
             int32_t position = (int32_t)magnitude;
 
-            s_positions[motor_id - 1U].position_x10_deg =
+            s_positions[motor_id - 1U].write_guard++;
+            ZdtX42s_MemoryBarrier();
+            s_positions[motor_id - 1U].sample.position_x10_deg =
                 data[1] == 0x01U ? -position : position;
-            s_positions[motor_id - 1U].timestamp_ms = HAL_GetTick();
-            s_positions[motor_id - 1U].sequence++;
-            s_positions[motor_id - 1U].valid = true;
+            s_positions[motor_id - 1U].sample.timestamp_ms = HAL_GetTick();
+            s_positions[motor_id - 1U].sample.sequence++;
+            s_positions[motor_id - 1U].sample.valid = true;
+            ZdtX42s_MemoryBarrier();
+            s_positions[motor_id - 1U].write_guard++;
         }
     }
 }

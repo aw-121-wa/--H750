@@ -19,6 +19,7 @@ add_host_test(zdt_x42s_driver_test
     ../devices/motor/zdt_x42s/zdt_x42s.c
     ../devices/motor/zdt_x42s/zdt_x42s_protocol.c
 )
+target_compile_definitions(zdt_x42s_driver_test PRIVATE ZDT_X42S_TEST_HOOKS)
 
 add_host_test(chassis_driver_test
     control/chassis/chassis_driver_test.c

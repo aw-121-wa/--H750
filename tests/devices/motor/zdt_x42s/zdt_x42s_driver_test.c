@@ -23,10 +23,22 @@ static HAL_StatusTypeDef fake_filter_status = HAL_OK;
 static FDCAN_RxHeaderTypeDef fake_rx_header;
 static uint8_t fake_rx_data[8];
 static uint32_t fake_tick;
+static FDCAN_HandleTypeDef *active_handle;
+static bool position_read_hook_enabled;
 
 uint32_t HAL_GetTick(void)
 {
     return fake_tick;
+}
+
+void ZdtX42s_TestPositionReadHook(void)
+{
+    if (position_read_hook_enabled)
+    {
+        position_read_hook_enabled = false;
+        HAL_FDCAN_RxFifo0Callback(active_handle,
+                                  FDCAN_IT_RX_FIFO0_NEW_MESSAGE);
+    }
 }
 
 static void reset_fake(void)
@@ -42,6 +54,8 @@ static void reset_fake(void)
     memset(&fake_rx_header, 0, sizeof(fake_rx_header));
     memset(fake_rx_data, 0, sizeof(fake_rx_data));
     fake_tick = 0U;
+    active_handle = NULL;
+    position_read_hook_enabled = false;
 }
 
 HAL_StatusTypeDef HAL_FDCAN_ConfigFilter(FDCAN_HandleTypeDef *hfdcan,
@@ -279,6 +293,37 @@ static void test_position_sample_sequence_advances_only_for_valid_reply(void)
     assert(sample.timestamp_ms == 10U);
 }
 
+static void test_position_sample_retries_after_interrupted_read(void)
+{
+    FDCAN_HandleTypeDef handle = {0};
+    ZdtX42sPositionSample sample = {0};
+
+    reset_fake();
+    active_handle = &handle;
+    assert(ZdtX42s_Init(&handle) == HAL_OK);
+
+    fake_tick = 10U;
+    fake_rx_header.Identifier = 0x100U;
+    fake_rx_header.IdType = FDCAN_EXTENDED_ID;
+    fake_rx_header.DataLength = FDCAN_DLC_BYTES_7;
+    fake_rx_data[0] = 0x36U;
+    fake_rx_data[1] = 0x00U;
+    fake_rx_data[2] = 0x00U;
+    fake_rx_data[3] = 0x00U;
+    fake_rx_data[4] = 0x00U;
+    fake_rx_data[5] = 0x2AU;
+    fake_rx_data[6] = 0x6BU;
+    HAL_FDCAN_RxFifo0Callback(&handle, FDCAN_IT_RX_FIFO0_NEW_MESSAGE);
+
+    fake_tick = 11U;
+    fake_rx_data[5] = 0x63U;
+    position_read_hook_enabled = true;
+    assert(ZdtX42s_GetPositionSample(1U, &sample));
+    assert(sample.position_x10_deg == 99);
+    assert(sample.timestamp_ms == 11U);
+    assert(sample.sequence == 2U);
+}
+
 int main(void)
 {
     test_init_accepts_extended_frames_and_rejects_others();
@@ -289,6 +334,7 @@ int main(void)
     test_rx_callback_records_motor_reply();
     test_position_request_and_reply();
     test_position_sample_sequence_advances_only_for_valid_reply();
+    test_position_sample_retries_after_interrupted_read();
     puts("ZDT CAN driver tests passed");
     return 0;
 }
