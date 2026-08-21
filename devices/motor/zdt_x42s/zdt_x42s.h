@@ -10,6 +10,14 @@
 
 typedef struct
 {
+    int32_t position_x10_deg;
+    uint32_t timestamp_ms;
+    uint32_t sequence;
+    bool valid;
+} ZdtX42sPositionSample;
+
+typedef struct
+{
     /* 触发：HAL_FDCAN_AddMessageToTxFifoQ 返回 HAL_OK 时 +1 */
     uint32_t tx_success_count;
     /* 触发：Send 入参为 NULL 或 HAL 发送失败时 +1 */
@@ -46,6 +54,10 @@ HAL_StatusTypeDef ZdtX42s_RequestPosition(uint8_t motor_id);
 bool ZdtX42s_GetPosition(uint8_t motor_id,
                          int32_t *position_x10_deg,
                          uint32_t *age_ms);
+
+/** Copies the latest position reply with its receive sequence. */
+bool ZdtX42s_GetPositionSample(uint8_t motor_id,
+                               ZdtX42sPositionSample *sample);
 
 /** 入队广播同步启动帧。 */
 HAL_StatusTypeDef ZdtX42s_Sync(void);

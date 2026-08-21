@@ -245,6 +245,40 @@ static void test_position_request_and_reply(void)
     assert(age == 25U);
 }
 
+static void test_position_sample_sequence_advances_only_for_valid_reply(void)
+{
+    FDCAN_HandleTypeDef handle = {0};
+    ZdtX42sPositionSample sample = {0};
+
+    reset_fake();
+    assert(ZdtX42s_Init(&handle) == HAL_OK);
+
+    fake_tick = 10U;
+    fake_rx_header.Identifier = 0x100U;
+    fake_rx_header.IdType = FDCAN_EXTENDED_ID;
+    fake_rx_header.DataLength = FDCAN_DLC_BYTES_7;
+    fake_rx_data[0] = 0x36U;
+    fake_rx_data[1] = 0x00U;
+    fake_rx_data[2] = 0x00U;
+    fake_rx_data[3] = 0x00U;
+    fake_rx_data[4] = 0x00U;
+    fake_rx_data[5] = 0x2AU;
+    fake_rx_data[6] = 0x6BU;
+    HAL_FDCAN_RxFifo0Callback(&handle, FDCAN_IT_RX_FIFO0_NEW_MESSAGE);
+
+    assert(ZdtX42s_GetPositionSample(1U, &sample));
+    assert(sample.position_x10_deg == 42);
+    assert(sample.timestamp_ms == 10U);
+    assert(sample.sequence == 1U);
+
+    fake_tick = 11U;
+    fake_rx_data[6] = 0x00U;
+    HAL_FDCAN_RxFifo0Callback(&handle, FDCAN_IT_RX_FIFO0_NEW_MESSAGE);
+    assert(ZdtX42s_GetPositionSample(1U, &sample));
+    assert(sample.sequence == 1U);
+    assert(sample.timestamp_ms == 10U);
+}
+
 int main(void)
 {
     test_init_accepts_extended_frames_and_rejects_others();
@@ -254,6 +288,7 @@ int main(void)
     test_sync_command_and_diagnostics();
     test_rx_callback_records_motor_reply();
     test_position_request_and_reply();
+    test_position_sample_sequence_advances_only_for_valid_reply();
     puts("ZDT CAN driver tests passed");
     return 0;
 }

@@ -54,6 +54,11 @@ add_host_test(localization_test
 )
 target_link_libraries(localization_test PRIVATE m)
 
+add_host_test(localization_service_test
+    control/localization/localization_service_test.c
+    ../control/localization/localization_service.c
+)
+
 add_host_test(host_protocol_test
     platform/communication/host_protocol_test.c
     ../platform/communication/host_protocol.c

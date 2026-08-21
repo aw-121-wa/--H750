@@ -7,13 +7,6 @@
 static FDCAN_HandleTypeDef *s_fdcan;
 static volatile ZdtX42sDiagnostics s_diagnostics;
 
-typedef struct
-{
-    int32_t position_x10_deg;
-    uint32_t timestamp_ms;
-    bool valid;
-} ZdtX42sPositionSample;
-
 static volatile ZdtX42sPositionSample s_positions[ZDT_X42S_MOTOR_COUNT];
 
 static HAL_StatusTypeDef ZdtX42s_Send(
@@ -155,6 +148,18 @@ bool ZdtX42s_GetPosition(uint8_t motor_id,
     return true;
 }
 
+bool ZdtX42s_GetPositionSample(uint8_t motor_id,
+                               ZdtX42sPositionSample *sample)
+{
+    if (motor_id == 0U || motor_id > ZDT_X42S_MOTOR_COUNT || sample == NULL ||
+        !s_positions[motor_id - 1U].valid)
+    {
+        return false;
+    }
+    *sample = s_positions[motor_id - 1U];
+    return true;
+}
+
 bool ZdtX42s_HasTxCapacity(uint32_t frame_count)
 {
     return s_fdcan != NULL &&
@@ -208,6 +213,7 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan,
             s_positions[motor_id - 1U].position_x10_deg =
                 data[1] == 0x01U ? -position : position;
             s_positions[motor_id - 1U].timestamp_ms = HAL_GetTick();
+            s_positions[motor_id - 1U].sequence++;
             s_positions[motor_id - 1U].valid = true;
         }
     }
