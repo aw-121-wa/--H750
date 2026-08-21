@@ -238,7 +238,7 @@ void START_Task(void *argument)
  *
  * 阶段3 健康监测：
  *   imu_valid       ← Hwt101_GetDiagnostics(): 有效帧>0 且 100ms 内有新帧
- *   can_valid       ← ZdtX42s_GetDiagnostics(): 总线错误=0 且无异常跳变
+ *   can_valid       ← ZdtX42s_GetHealth(): 当前状态非 passive/bus-off 且无异常跳变
  *   heartbeat_valid ← HostLink_GetHeartbeatAgeMs(): 500ms 内有上位机帧
  *   Navigation_SetHealth() → 任一不健康则设置故障标志
  *
@@ -263,8 +263,8 @@ void MAIN_Task(void *argument)
   {
     const uint32_t now_ms = HAL_GetTick();
     const volatile Hwt101Diagnostics *imu_diagnostics = Hwt101_GetDiagnostics();
-    const volatile ZdtX42sDiagnostics *can_diagnostics = ZdtX42s_GetDiagnostics();
     LocalizationServiceStatus localization_status;
+    ZdtX42sHealth can_health;
     LocalizationStatus pose_status;
     HostCommand command;
     bool imu_valid;
@@ -276,6 +276,7 @@ void MAIN_Task(void *argument)
     LocalizationService_Tick(now_ms, hwt101_data.yaw);
     localization_status = LocalizationService_GetStatus(now_ms);
     pose_status = Localization_GetStatus();
+    ZdtX42s_Service(now_ms);
 
     /* ── 阶段2：命令处理 ── */
     while (HostLink_TakeCommand(&command))
@@ -338,10 +339,13 @@ void MAIN_Task(void *argument)
     /* ── 阶段3：健康监测 ── */
     imu_valid = imu_diagnostics->angle_frame_count != 0U &&
                 (now_ms - imu_diagnostics->last_angle_frame_ms) <= 100U;
-    can_valid = can_diagnostics->bus_error_count == 0U &&
+    can_health = ZdtX42s_GetHealth(now_ms);
+    can_valid = can_health.bus_state != ZDT_CAN_ERROR_PASSIVE &&
+                can_health.bus_state != ZDT_CAN_BUS_OFF &&
                 !localization_status.unreasonable_jump;
     heartbeat_valid = HostLink_GetHeartbeatAgeMs(now_ms) <= 500U;
-    Navigation_SetHealth(localization_status.motor_valid_mask == 0x0FU,
+    Navigation_SetHealth(localization_status.motor_valid_mask == 0x0FU &&
+                         can_health.motor_online_mask == 0x0FU,
                          imu_valid, can_valid, heartbeat_valid);
 
     /* ── 阶段4：导航状态机 ── */

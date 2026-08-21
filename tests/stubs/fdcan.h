@@ -53,6 +53,16 @@ typedef struct
     uint32_t DataLength;
 } FDCAN_RxHeaderTypeDef;
 
+typedef struct
+{
+    uint32_t LastErrorCode;
+    uint32_t DataLastErrorCode;
+    uint32_t Activity;
+    uint32_t ErrorPassive;
+    uint32_t Warning;
+    uint32_t BusOff;
+} FDCAN_ProtocolStatusTypeDef;
+
 #define FDCAN_EXTENDED_ID                 1U
 #define FDCAN_DATA_FRAME                  2U
 #define FDCAN_REMOTE_FRAME                3U
@@ -87,6 +97,10 @@ HAL_StatusTypeDef HAL_FDCAN_ConfigGlobalFilter(FDCAN_HandleTypeDef *hfdcan,
                                                uint32_t reject_remote_std,
                                                uint32_t reject_remote_ext);
 HAL_StatusTypeDef HAL_FDCAN_Start(FDCAN_HandleTypeDef *hfdcan);
+HAL_StatusTypeDef HAL_FDCAN_Stop(FDCAN_HandleTypeDef *hfdcan);
+HAL_StatusTypeDef HAL_FDCAN_GetProtocolStatus(
+    const FDCAN_HandleTypeDef *hfdcan,
+    FDCAN_ProtocolStatusTypeDef *status);
 HAL_StatusTypeDef HAL_FDCAN_ActivateNotification(FDCAN_HandleTypeDef *hfdcan,
                                                  uint32_t notifications,
                                                  uint32_t buffer_indexes);

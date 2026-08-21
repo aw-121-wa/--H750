@@ -35,6 +35,11 @@ static QueuedRxFrame rx_queue[8];
 static size_t rx_queue_count;
 static size_t rx_queue_index;
 static bool single_rx_pending;
+static FDCAN_ProtocolStatusTypeDef fake_protocol_status;
+static HAL_StatusTypeDef fake_stop_status;
+static HAL_StatusTypeDef fake_start_status;
+static uint32_t stop_call_count;
+static uint32_t start_call_count;
 
 static void trigger_rx_callback(FDCAN_HandleTypeDef *handle);
 
@@ -71,6 +76,11 @@ static void reset_fake(void)
     rx_queue_count = 0U;
     rx_queue_index = 0U;
     single_rx_pending = false;
+    memset(&fake_protocol_status, 0, sizeof(fake_protocol_status));
+    fake_stop_status = HAL_OK;
+    fake_start_status = HAL_OK;
+    stop_call_count = 0U;
+    start_call_count = 0U;
 }
 
 HAL_StatusTypeDef HAL_FDCAN_ConfigFilter(FDCAN_HandleTypeDef *hfdcan,
@@ -98,6 +108,23 @@ HAL_StatusTypeDef HAL_FDCAN_ConfigGlobalFilter(FDCAN_HandleTypeDef *hfdcan,
 HAL_StatusTypeDef HAL_FDCAN_Start(FDCAN_HandleTypeDef *hfdcan)
 {
     (void)hfdcan;
+    start_call_count++;
+    return fake_start_status;
+}
+
+HAL_StatusTypeDef HAL_FDCAN_Stop(FDCAN_HandleTypeDef *hfdcan)
+{
+    (void)hfdcan;
+    stop_call_count++;
+    return fake_stop_status;
+}
+
+HAL_StatusTypeDef HAL_FDCAN_GetProtocolStatus(
+    const FDCAN_HandleTypeDef *hfdcan,
+    FDCAN_ProtocolStatusTypeDef *status)
+{
+    (void)hfdcan;
+    *status = fake_protocol_status;
     return HAL_OK;
 }
 
@@ -471,6 +498,98 @@ static void test_invalid_frames_do_not_count_as_motor_replies(void)
     assert(diagnostics->rx_fifo_lost_count == 1U);
 }
 
+static void publish_valid_motor_reply(FDCAN_HandleTypeDef *handle,
+                                      uint8_t motor_id,
+                                      uint32_t tick)
+{
+    fake_tick = tick;
+    fake_rx_header.Identifier = (uint32_t)motor_id << 8U;
+    fake_rx_header.IdType = FDCAN_EXTENDED_ID;
+    fake_rx_header.RxFrameType = FDCAN_DATA_FRAME;
+    fake_rx_header.DataLength = FDCAN_DLC_BYTES_3;
+    fake_rx_data[0] = 0xF6U;
+    fake_rx_data[1] = 0x00U;
+    fake_rx_data[2] = 0x6BU;
+    trigger_rx_callback(handle);
+}
+
+static void test_motor_online_mask_uses_reply_freshness(void)
+{
+    FDCAN_HandleTypeDef handle = {0};
+
+    reset_fake();
+    assert(ZdtX42s_Init(&handle) == HAL_OK);
+    for (uint8_t motor_id = 1U; motor_id <= ZDT_X42S_MOTOR_COUNT; ++motor_id)
+    {
+        publish_valid_motor_reply(&handle, motor_id, 100U + motor_id);
+    }
+    assert(ZdtX42s_GetMotorOnlineMask(302U) == 0x0EU);
+    assert(ZdtX42s_GetMotorOnlineMask(300U) == 0x0FU);
+}
+
+static void test_can_error_state_is_current_and_counted(void)
+{
+    FDCAN_HandleTypeDef handle = {0};
+    const volatile ZdtX42sDiagnostics *diagnostics;
+    ZdtX42sHealth health;
+
+    reset_fake();
+    assert(ZdtX42s_Init(&handle) == HAL_OK);
+
+    fake_tick = 10U;
+    HAL_FDCAN_ErrorStatusCallback(&handle, FDCAN_IT_ERROR_WARNING);
+    diagnostics = ZdtX42s_GetDiagnostics();
+    health = ZdtX42s_GetHealth(10U);
+    assert(diagnostics->bus_error_count == 1U);
+    assert(diagnostics->error_warning_count == 1U);
+    assert(diagnostics->last_error_ms == 10U);
+    assert(health.bus_state == ZDT_CAN_WARNING);
+
+    fake_tick = 20U;
+    HAL_FDCAN_ErrorStatusCallback(&handle, FDCAN_IT_ERROR_PASSIVE);
+    assert(ZdtX42s_GetHealth(20U).bus_state == ZDT_CAN_ERROR_PASSIVE);
+
+    fake_tick = 30U;
+    HAL_FDCAN_ErrorStatusCallback(&handle, FDCAN_IT_BUS_OFF);
+    diagnostics = ZdtX42s_GetDiagnostics();
+    assert(diagnostics->error_passive_count == 1U);
+    assert(diagnostics->bus_off_count == 1U);
+    assert(ZdtX42s_GetHealth(30U).bus_state == ZDT_CAN_BUS_OFF);
+}
+
+static void test_bus_off_recovery_sends_stop_before_ready(void)
+{
+    FDCAN_HandleTypeDef handle = {0};
+    uint32_t initial_start_count;
+    ZdtX42sHealth health;
+
+    reset_fake();
+    assert(ZdtX42s_Init(&handle) == HAL_OK);
+    initial_start_count = start_call_count;
+    HAL_FDCAN_ErrorStatusCallback(&handle, FDCAN_IT_BUS_OFF);
+
+    ZdtX42s_Service(10U);
+    assert(stop_call_count == 1U);
+    assert(start_call_count == initial_start_count + 1U);
+    assert(captured_frame_count == 5U);
+    for (size_t i = 0U; i < 4U; ++i)
+    {
+        assert(captured_frames[i].data[0] == 0xF6U);
+        assert(captured_frames[i].data[4] == 0x00U);
+        assert(captured_frames[i].data[5] == 0x00U);
+    }
+
+    for (uint8_t motor_id = 1U; motor_id <= ZDT_X42S_MOTOR_COUNT; ++motor_id)
+    {
+        publish_valid_motor_reply(&handle, motor_id, 20U + motor_id);
+    }
+    fake_protocol_status.BusOff = 0U;
+    ZdtX42s_Service(30U);
+    health = ZdtX42s_GetHealth(30U);
+    assert(health.bus_state == ZDT_CAN_OK);
+    assert(health.motor_online_mask == 0x0FU);
+}
+
 int main(void)
 {
     test_init_accepts_extended_frames_and_rejects_others();
@@ -484,6 +603,9 @@ int main(void)
     test_position_sample_retries_after_interrupted_read();
     test_rx_callback_drains_all_queued_frames();
     test_invalid_frames_do_not_count_as_motor_replies();
+    test_motor_online_mask_uses_reply_freshness();
+    test_can_error_state_is_current_and_counted();
+    test_bus_off_recovery_sends_stop_before_ready();
     puts("ZDT CAN driver tests passed");
     return 0;
 }

@@ -84,10 +84,28 @@ static void test_heartbeat_failure_stops_navigation(void)
     assert((Navigation_GetFaultFlags() & NAVIGATION_FAULT_HEARTBEAT) != 0U);
 }
 
+static void test_health_recovery_does_not_resume_faulted_navigation(void)
+{
+    NavigationRoute route = {.point_count = 1U, .points = {{1000, 0}}};
+
+    Navigation_Init();
+    fake_pose = (NavigationPose){0};
+    assert(Navigation_LoadRoute(&route) == NAVIGATION_OK);
+    assert(Navigation_Start() == NAVIGATION_OK);
+    Navigation_SetHealth(false, true, false, true);
+    Navigation_Tick(10U);
+    assert(Navigation_GetState() == NAVIGATION_FAULT);
+
+    Navigation_SetHealth(true, true, true, true);
+    Navigation_Tick(20U);
+    assert(Navigation_GetState() == NAVIGATION_FAULT);
+}
+
 int main(void)
 {
     test_aligns_moves_and_arrives();
     test_heartbeat_failure_stops_navigation();
+    test_health_recovery_does_not_resume_faulted_navigation();
     puts("Navigation tests passed");
     return 0;
 }

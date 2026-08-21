@@ -4,8 +4,13 @@
 
 #include "devices/motor/zdt_x42s/zdt_x42s_protocol.h"
 
+#define ZDT_MOTOR_REPLY_STALE_MS 200U
+#define ZDT_STOP_ACCELERATION_RPM_S 1000U
+
 static FDCAN_HandleTypeDef *s_fdcan;
 static volatile ZdtX42sDiagnostics s_diagnostics;
+static bool s_recovery_in_progress;
+static bool s_stop_sent_after_recovery;
 
 typedef struct
 {
@@ -82,6 +87,8 @@ HAL_StatusTypeDef ZdtX42s_Init(FDCAN_HandleTypeDef *hfdcan)
     memset((void *)&s_diagnostics, 0, sizeof(s_diagnostics));
     memset((void *)s_positions, 0, sizeof(s_positions));
     s_fdcan = NULL;
+    s_recovery_in_progress = false;
+    s_stop_sent_after_recovery = false;
 
     filter.IdType = FDCAN_EXTENDED_ID;
     filter.FilterIndex = 0U;
@@ -108,6 +115,7 @@ HAL_StatusTypeDef ZdtX42s_Init(FDCAN_HandleTypeDef *hfdcan)
     if (status == HAL_OK)
     {
         s_fdcan = hfdcan;
+        s_diagnostics.current_state = ZDT_CAN_OK;
     }
     return status;
 }
@@ -214,6 +222,111 @@ bool ZdtX42s_HasTxCapacity(uint32_t frame_count)
 const volatile ZdtX42sDiagnostics *ZdtX42s_GetDiagnostics(void)
 {
     return &s_diagnostics;
+}
+
+uint8_t ZdtX42s_GetMotorOnlineMask(uint32_t now_ms)
+{
+    uint8_t online_mask = 0U;
+
+    for (uint8_t i = 0U; i < ZDT_X42S_MOTOR_COUNT; ++i)
+    {
+        if (s_diagnostics.motor_reply_count[i] != 0U &&
+            (now_ms - s_diagnostics.last_motor_reply_ms[i]) <=
+                ZDT_MOTOR_REPLY_STALE_MS)
+        {
+            online_mask |= (uint8_t)(1U << i);
+        }
+    }
+    return online_mask;
+}
+
+ZdtX42sHealth ZdtX42s_GetHealth(uint32_t now_ms)
+{
+    ZdtX42sHealth health = {0};
+
+    health.bus_state = s_diagnostics.current_state;
+    health.motor_online_mask = ZdtX42s_GetMotorOnlineMask(now_ms);
+    return health;
+}
+
+static HAL_StatusTypeDef ZdtX42s_SendStopCommand(void)
+{
+    if (!ZdtX42s_HasTxCapacity(ZDT_X42S_MOTOR_COUNT + 1U))
+    {
+        return HAL_BUSY;
+    }
+    for (uint8_t motor_id = 1U; motor_id <= ZDT_X42S_MOTOR_COUNT; ++motor_id)
+    {
+        HAL_StatusTypeDef status = ZdtX42s_SetSpeedX10(
+            motor_id, 0, ZDT_STOP_ACCELERATION_RPM_S, true);
+        if (status != HAL_OK)
+        {
+            return status;
+        }
+    }
+    return ZdtX42s_Sync();
+}
+
+void ZdtX42s_Service(uint32_t now_ms)
+{
+    FDCAN_ProtocolStatusTypeDef protocol_status = {0};
+
+    (void)now_ms;
+    if (s_fdcan == NULL)
+    {
+        return;
+    }
+
+    if (s_diagnostics.current_state == ZDT_CAN_BUS_OFF)
+    {
+        if (!s_recovery_in_progress)
+        {
+            if (HAL_FDCAN_Stop(s_fdcan) != HAL_OK ||
+                HAL_FDCAN_Start(s_fdcan) != HAL_OK)
+            {
+                return;
+            }
+            s_recovery_in_progress = true;
+            s_stop_sent_after_recovery = false;
+        }
+        if (!s_stop_sent_after_recovery &&
+            ZdtX42s_SendStopCommand() == HAL_OK)
+        {
+            s_stop_sent_after_recovery = true;
+        }
+        if (s_stop_sent_after_recovery &&
+            ZdtX42s_GetMotorOnlineMask(now_ms) ==
+                ((1U << ZDT_X42S_MOTOR_COUNT) - 1U))
+        {
+            s_diagnostics.current_state = ZDT_CAN_OK;
+            s_recovery_in_progress = false;
+            s_stop_sent_after_recovery = false;
+        }
+        return;
+    }
+
+    if (HAL_FDCAN_GetProtocolStatus(s_fdcan, &protocol_status) != HAL_OK)
+    {
+        return;
+    }
+    if (protocol_status.BusOff != 0U)
+    {
+        s_diagnostics.current_state = ZDT_CAN_BUS_OFF;
+        s_recovery_in_progress = false;
+        s_stop_sent_after_recovery = false;
+    }
+    else if (protocol_status.ErrorPassive != 0U)
+    {
+        s_diagnostics.current_state = ZDT_CAN_ERROR_PASSIVE;
+    }
+    else if (protocol_status.Warning != 0U)
+    {
+        s_diagnostics.current_state = ZDT_CAN_WARNING;
+    }
+    else
+    {
+        s_diagnostics.current_state = ZDT_CAN_OK;
+    }
 }
 
 static void ZdtX42s_ParseRxFrame(const FDCAN_RxHeaderTypeDef *header,
@@ -346,6 +459,7 @@ void HAL_FDCAN_ErrorCallback(FDCAN_HandleTypeDef *hfdcan)
     {
         s_diagnostics.bus_error_count++;
         s_diagnostics.last_error_code = hfdcan->ErrorCode;
+        s_diagnostics.last_error_ms = HAL_GetTick();
     }
 }
 
@@ -357,5 +471,29 @@ void HAL_FDCAN_ErrorStatusCallback(FDCAN_HandleTypeDef *hfdcan,
     {
         s_diagnostics.bus_error_count++;
         s_diagnostics.last_error_code = error_status_its;
+        s_diagnostics.last_error_ms = HAL_GetTick();
+        if ((error_status_its & FDCAN_IT_ERROR_WARNING) != 0U)
+        {
+            s_diagnostics.error_warning_count++;
+        }
+        if ((error_status_its & FDCAN_IT_ERROR_PASSIVE) != 0U)
+        {
+            s_diagnostics.error_passive_count++;
+        }
+        if ((error_status_its & FDCAN_IT_BUS_OFF) != 0U)
+        {
+            s_diagnostics.bus_off_count++;
+            s_diagnostics.current_state = ZDT_CAN_BUS_OFF;
+            s_recovery_in_progress = false;
+            s_stop_sent_after_recovery = false;
+        }
+        else if ((error_status_its & FDCAN_IT_ERROR_PASSIVE) != 0U)
+        {
+            s_diagnostics.current_state = ZDT_CAN_ERROR_PASSIVE;
+        }
+        else if ((error_status_its & FDCAN_IT_ERROR_WARNING) != 0U)
+        {
+            s_diagnostics.current_state = ZDT_CAN_WARNING;
+        }
     }
 }

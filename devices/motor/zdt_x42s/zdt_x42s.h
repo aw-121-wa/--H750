@@ -8,6 +8,14 @@
 
 #define ZDT_X42S_MOTOR_COUNT 4U
 
+typedef enum
+{
+    ZDT_CAN_OK = 0,
+    ZDT_CAN_WARNING,
+    ZDT_CAN_ERROR_PASSIVE,
+    ZDT_CAN_BUS_OFF
+} ZdtCanState;
+
 typedef struct
 {
     int32_t position_x10_deg;
@@ -51,7 +59,18 @@ typedef struct
     uint32_t last_motor_reply_ms[ZDT_X42S_MOTOR_COUNT];
     /* 最近一次合法位置回复时间，按电机索引保存 */
     uint32_t last_position_reply_ms[ZDT_X42S_MOTOR_COUNT];
+    uint32_t error_warning_count;
+    uint32_t error_passive_count;
+    uint32_t bus_off_count;
+    uint32_t last_error_ms;
+    ZdtCanState current_state;
 } ZdtX42sDiagnostics;
+
+typedef struct
+{
+    ZdtCanState bus_state;
+    uint8_t motor_online_mask;
+} ZdtX42sHealth;
 
 /** 配置滤波器，启动 FDCAN，并使能诊断回调。 */
 HAL_StatusTypeDef ZdtX42s_Init(FDCAN_HandleTypeDef *hfdcan);
@@ -82,5 +101,14 @@ bool ZdtX42s_HasTxCapacity(uint32_t frame_count);
 
 /** 返回只读的 CAN 通信诊断信息。 */
 const volatile ZdtX42sDiagnostics *ZdtX42s_GetDiagnostics(void);
+
+/** Returns the mask of motors with a legal reply within the freshness window. */
+uint8_t ZdtX42s_GetMotorOnlineMask(uint32_t now_ms);
+
+/** Returns current CAN state and the current motor online mask. */
+ZdtX42sHealth ZdtX42s_GetHealth(uint32_t now_ms);
+
+/** Services Bus-Off recovery from task context. */
+void ZdtX42s_Service(uint32_t now_ms);
 
 #endif
