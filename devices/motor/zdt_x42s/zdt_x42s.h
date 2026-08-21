@@ -36,6 +36,21 @@ typedef struct
     uint8_t last_status;
     /* 触发：RxFifo0 回调中按扩展帧 ID 高字节解析电机 ID（1-4），对应索引 +1 */
     uint32_t motor_reply_count[ZDT_X42S_MOTOR_COUNT];
+    /* 触发：收到不符合帧类型或电机 ID 规则的帧时 +1 */
+    uint32_t invalid_frame_count;
+    /* 触发：已知功能码的 DLC 不匹配时 +1 */
+    uint32_t invalid_dlc_count;
+    /* 触发：已知功能码的固定尾字节不匹配时 +1 */
+    uint32_t invalid_tail_count;
+    /* 触发：收到未实现的功能码时 +1 */
+    uint32_t unknown_function_count;
+    /* 触发：RX FIFO0 满或丢帧通知到达时 +1 */
+    uint32_t rx_fifo_full_count;
+    uint32_t rx_fifo_lost_count;
+    /* 最近一次合法协议回复时间，按电机索引保存 */
+    uint32_t last_motor_reply_ms[ZDT_X42S_MOTOR_COUNT];
+    /* 最近一次合法位置回复时间，按电机索引保存 */
+    uint32_t last_position_reply_ms[ZDT_X42S_MOTOR_COUNT];
 } ZdtX42sDiagnostics;
 
 /** 配置滤波器，启动 FDCAN，并使能诊断回调。 */

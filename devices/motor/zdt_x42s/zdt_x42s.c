@@ -68,6 +68,8 @@ HAL_StatusTypeDef ZdtX42s_Init(FDCAN_HandleTypeDef *hfdcan)
     FDCAN_FilterTypeDef filter = {0};
     HAL_StatusTypeDef status;
     const uint32_t notifications = FDCAN_IT_RX_FIFO0_NEW_MESSAGE |
+                                   FDCAN_IT_RX_FIFO0_FULL |
+                                   FDCAN_IT_RX_FIFO0_MESSAGE_LOST |
                                    FDCAN_IT_BUS_OFF |
                                    FDCAN_IT_ERROR_WARNING |
                                    FDCAN_IT_ERROR_PASSIVE;
@@ -83,8 +85,10 @@ HAL_StatusTypeDef ZdtX42s_Init(FDCAN_HandleTypeDef *hfdcan)
 
     filter.IdType = FDCAN_EXTENDED_ID;
     filter.FilterIndex = 0U;
-    filter.FilterType = FDCAN_FILTER_MASK;
+    filter.FilterType = FDCAN_FILTER_RANGE;
     filter.FilterConfig = FDCAN_FILTER_TO_RXFIFO0;
+    filter.FilterID1 = 0x100U;
+    filter.FilterID2 = 0x4FFU;
 
     status = HAL_FDCAN_ConfigFilter(hfdcan, &filter);
     if (status == HAL_OK)
@@ -212,55 +216,126 @@ const volatile ZdtX42sDiagnostics *ZdtX42s_GetDiagnostics(void)
     return &s_diagnostics;
 }
 
-/* 解码一个电机回复并更新接收诊断信息。 */
+static void ZdtX42s_ParseRxFrame(const FDCAN_RxHeaderTypeDef *header,
+                                 const uint8_t *data)
+{
+    uint8_t motor_id;
+    uint32_t now_ms;
+
+    if (header == NULL || data == NULL)
+    {
+        return;
+    }
+    if (header->IdType != FDCAN_EXTENDED_ID ||
+        header->RxFrameType != FDCAN_DATA_FRAME)
+    {
+        s_diagnostics.invalid_frame_count++;
+        return;
+    }
+
+    motor_id = (uint8_t)(header->Identifier >> 8U);
+    if (motor_id == 0U || motor_id > ZDT_X42S_MOTOR_COUNT ||
+        header->Identifier != ((uint32_t)motor_id << 8U))
+    {
+        s_diagnostics.invalid_frame_count++;
+        return;
+    }
+
+    now_ms = HAL_GetTick();
+    if (data[0] == 0xF6U)
+    {
+        if (header->DataLength != FDCAN_DLC_BYTES_3)
+        {
+            s_diagnostics.invalid_dlc_count++;
+            return;
+        }
+        if (data[2] != 0x6BU)
+        {
+            s_diagnostics.invalid_tail_count++;
+            return;
+        }
+        s_diagnostics.motor_reply_count[motor_id - 1U]++;
+        s_diagnostics.last_motor_reply_ms[motor_id - 1U] = now_ms;
+        return;
+    }
+
+    if (data[0] != 0x36U)
+    {
+        s_diagnostics.unknown_function_count++;
+        return;
+    }
+    if (header->DataLength != FDCAN_DLC_BYTES_7)
+    {
+        s_diagnostics.invalid_dlc_count++;
+        return;
+    }
+    if (data[6] != 0x6BU)
+    {
+        s_diagnostics.invalid_tail_count++;
+        return;
+    }
+
+    {
+        uint32_t magnitude = ((uint32_t)data[2] << 24U) |
+                             ((uint32_t)data[3] << 16U) |
+                             ((uint32_t)data[4] << 8U) |
+                             (uint32_t)data[5];
+        int32_t position = (int32_t)magnitude;
+
+        s_diagnostics.motor_reply_count[motor_id - 1U]++;
+        s_diagnostics.last_motor_reply_ms[motor_id - 1U] = now_ms;
+        s_diagnostics.last_position_reply_ms[motor_id - 1U] = now_ms;
+        s_positions[motor_id - 1U].write_guard++;
+        ZdtX42s_MemoryBarrier();
+        s_positions[motor_id - 1U].sample.position_x10_deg =
+            data[1] == 0x01U ? -position : position;
+        s_positions[motor_id - 1U].sample.timestamp_ms = now_ms;
+        s_positions[motor_id - 1U].sample.sequence++;
+        s_positions[motor_id - 1U].sample.valid = true;
+        ZdtX42s_MemoryBarrier();
+        s_positions[motor_id - 1U].write_guard++;
+    }
+}
+
+/* 解码 FIFO 中的电机回复并更新接收诊断信息。 */
 void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan,
                                uint32_t rx_fifo0_its)
 {
     FDCAN_RxHeaderTypeDef header = {0};
     uint8_t data[ZDT_X42S_CAN_MAX_DATA_LENGTH] = {0};
-    uint8_t motor_id;
 
-    if (hfdcan != s_fdcan ||
-        (rx_fifo0_its & FDCAN_IT_RX_FIFO0_NEW_MESSAGE) == 0U)
+    if (hfdcan != s_fdcan)
     {
         return;
     }
-    if (HAL_FDCAN_GetRxMessage(hfdcan, FDCAN_RX_FIFO0,
-                               &header, data) != HAL_OK)
+    if ((rx_fifo0_its & FDCAN_IT_RX_FIFO0_FULL) != 0U)
     {
-        s_diagnostics.bus_error_count++;
+        s_diagnostics.rx_fifo_full_count++;
+    }
+    if ((rx_fifo0_its & FDCAN_IT_RX_FIFO0_MESSAGE_LOST) != 0U)
+    {
+        s_diagnostics.rx_fifo_lost_count++;
+    }
+    if ((rx_fifo0_its & (FDCAN_IT_RX_FIFO0_NEW_MESSAGE |
+                         FDCAN_IT_RX_FIFO0_FULL |
+                         FDCAN_IT_RX_FIFO0_MESSAGE_LOST)) == 0U)
+    {
         return;
     }
 
-    s_diagnostics.rx_frame_count++;
-    s_diagnostics.last_rx_id = header.Identifier;
-    s_diagnostics.last_function = data[0];
-    s_diagnostics.last_status = data[1];
-
-    motor_id = (uint8_t)(header.Identifier >> 8U);
-    if (header.IdType == FDCAN_EXTENDED_ID &&
-        motor_id >= 1U && motor_id <= ZDT_X42S_MOTOR_COUNT)
+    while (HAL_FDCAN_GetRxFifoFillLevel(hfdcan, FDCAN_RX_FIFO0) > 0U)
     {
-        s_diagnostics.motor_reply_count[motor_id - 1U]++;
-        if (data[0] == 0x36U && header.DataLength == FDCAN_DLC_BYTES_7 &&
-            data[6] == 0x6BU)
+        if (HAL_FDCAN_GetRxMessage(hfdcan, FDCAN_RX_FIFO0,
+                                   &header, data) != HAL_OK)
         {
-            uint32_t magnitude = ((uint32_t)data[2] << 24U) |
-                                 ((uint32_t)data[3] << 16U) |
-                                 ((uint32_t)data[4] << 8U) |
-                                 (uint32_t)data[5];
-            int32_t position = (int32_t)magnitude;
-
-            s_positions[motor_id - 1U].write_guard++;
-            ZdtX42s_MemoryBarrier();
-            s_positions[motor_id - 1U].sample.position_x10_deg =
-                data[1] == 0x01U ? -position : position;
-            s_positions[motor_id - 1U].sample.timestamp_ms = HAL_GetTick();
-            s_positions[motor_id - 1U].sample.sequence++;
-            s_positions[motor_id - 1U].sample.valid = true;
-            ZdtX42s_MemoryBarrier();
-            s_positions[motor_id - 1U].write_guard++;
+            s_diagnostics.bus_error_count++;
+            break;
         }
+        s_diagnostics.rx_frame_count++;
+        s_diagnostics.last_rx_id = header.Identifier;
+        s_diagnostics.last_function = data[0];
+        s_diagnostics.last_status = data[1];
+        ZdtX42s_ParseRxFrame(&header, data);
     }
 }
 

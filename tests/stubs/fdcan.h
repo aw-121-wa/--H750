@@ -55,6 +55,7 @@ typedef struct
 
 #define FDCAN_EXTENDED_ID                 1U
 #define FDCAN_DATA_FRAME                  2U
+#define FDCAN_REMOTE_FRAME                3U
 #define FDCAN_DLC_BYTES_3                 3U
 #define FDCAN_DLC_BYTES_2                 2U
 #define FDCAN_DLC_BYTES_7                 7U
@@ -68,10 +69,13 @@ typedef struct
 #define FDCAN_REJECT                      10U
 #define FDCAN_REJECT_REMOTE               11U
 #define FDCAN_RX_FIFO0                    12U
+#define FDCAN_FILTER_RANGE                13U
 #define FDCAN_IT_RX_FIFO0_NEW_MESSAGE     (1UL << 0)
 #define FDCAN_IT_BUS_OFF                  (1UL << 1)
 #define FDCAN_IT_ERROR_WARNING            (1UL << 2)
 #define FDCAN_IT_ERROR_PASSIVE            (1UL << 3)
+#define FDCAN_IT_RX_FIFO0_FULL            (1UL << 4)
+#define FDCAN_IT_RX_FIFO0_MESSAGE_LOST    (1UL << 5)
 
 uint32_t HAL_GetTick(void);
 
@@ -91,9 +95,11 @@ HAL_StatusTypeDef HAL_FDCAN_AddMessageToTxFifoQ(FDCAN_HandleTypeDef *hfdcan,
                                                 uint8_t *data);
 uint32_t HAL_FDCAN_GetTxFifoFreeLevel(FDCAN_HandleTypeDef *hfdcan);
 HAL_StatusTypeDef HAL_FDCAN_GetRxMessage(FDCAN_HandleTypeDef *hfdcan,
-                                         uint32_t fifo,
-                                         FDCAN_RxHeaderTypeDef *header,
-                                         uint8_t *data);
+                                          uint32_t fifo,
+                                          FDCAN_RxHeaderTypeDef *header,
+                                          uint8_t *data);
+uint32_t HAL_FDCAN_GetRxFifoFillLevel(const FDCAN_HandleTypeDef *hfdcan,
+                                      uint32_t fifo);
 void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan,
                                uint32_t rx_fifo0_its);
 void HAL_FDCAN_ErrorCallback(FDCAN_HandleTypeDef *hfdcan);

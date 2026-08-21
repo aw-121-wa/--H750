@@ -12,6 +12,12 @@ typedef struct
     uint8_t data[8];
 } CapturedFrame;
 
+typedef struct
+{
+    FDCAN_RxHeaderTypeDef header;
+    uint8_t data[8];
+} QueuedRxFrame;
+
 static FDCAN_FilterTypeDef captured_filter;
 static uint32_t captured_global_filter[4];
 static uint32_t captured_notifications;
@@ -25,6 +31,12 @@ static uint8_t fake_rx_data[8];
 static uint32_t fake_tick;
 static FDCAN_HandleTypeDef *active_handle;
 static bool position_read_hook_enabled;
+static QueuedRxFrame rx_queue[8];
+static size_t rx_queue_count;
+static size_t rx_queue_index;
+static bool single_rx_pending;
+
+static void trigger_rx_callback(FDCAN_HandleTypeDef *handle);
 
 uint32_t HAL_GetTick(void)
 {
@@ -36,8 +48,7 @@ void ZdtX42s_TestPositionReadHook(void)
     if (position_read_hook_enabled)
     {
         position_read_hook_enabled = false;
-        HAL_FDCAN_RxFifo0Callback(active_handle,
-                                  FDCAN_IT_RX_FIFO0_NEW_MESSAGE);
+        trigger_rx_callback(active_handle);
     }
 }
 
@@ -56,6 +67,10 @@ static void reset_fake(void)
     fake_tick = 0U;
     active_handle = NULL;
     position_read_hook_enabled = false;
+    memset(rx_queue, 0, sizeof(rx_queue));
+    rx_queue_count = 0U;
+    rx_queue_index = 0U;
+    single_rx_pending = false;
 }
 
 HAL_StatusTypeDef HAL_FDCAN_ConfigFilter(FDCAN_HandleTypeDef *hfdcan,
@@ -117,15 +132,55 @@ uint32_t HAL_FDCAN_GetTxFifoFreeLevel(FDCAN_HandleTypeDef *hfdcan)
 }
 
 HAL_StatusTypeDef HAL_FDCAN_GetRxMessage(FDCAN_HandleTypeDef *hfdcan,
-                                        uint32_t fifo,
-                                        FDCAN_RxHeaderTypeDef *header,
-                                        uint8_t *data)
+                                         uint32_t fifo,
+                                         FDCAN_RxHeaderTypeDef *header,
+                                         uint8_t *data)
 {
     (void)hfdcan;
     assert(fifo == FDCAN_RX_FIFO0);
-    *header = fake_rx_header;
-    memcpy(data, fake_rx_data, sizeof(fake_rx_data));
+    if (rx_queue_index < rx_queue_count)
+    {
+        *header = rx_queue[rx_queue_index].header;
+        memcpy(data, rx_queue[rx_queue_index].data, sizeof(fake_rx_data));
+        rx_queue_index++;
+    }
+    else
+    {
+        assert(single_rx_pending);
+        *header = fake_rx_header;
+        memcpy(data, fake_rx_data, sizeof(fake_rx_data));
+        single_rx_pending = false;
+    }
     return HAL_OK;
+}
+
+uint32_t HAL_FDCAN_GetRxFifoFillLevel(const FDCAN_HandleTypeDef *hfdcan,
+                                      uint32_t fifo)
+{
+    (void)hfdcan;
+    assert(fifo == FDCAN_RX_FIFO0);
+    if (rx_queue_index < rx_queue_count)
+    {
+        return (uint32_t)(rx_queue_count - rx_queue_index);
+    }
+    return single_rx_pending ? 1U : 0U;
+}
+
+static void trigger_rx_callback(FDCAN_HandleTypeDef *handle)
+{
+    single_rx_pending = true;
+    HAL_FDCAN_RxFifo0Callback(handle, FDCAN_IT_RX_FIFO0_NEW_MESSAGE);
+}
+
+static void enqueue_rx_frame(const FDCAN_RxHeaderTypeDef *header,
+                             const uint8_t data[8])
+{
+    assert(rx_queue_count < (sizeof(rx_queue) / sizeof(rx_queue[0])));
+    rx_queue[rx_queue_count].header = *header;
+    memcpy(rx_queue[rx_queue_count].data,
+           data,
+           sizeof(rx_queue[rx_queue_count].data));
+    rx_queue_count++;
 }
 
 static void test_init_accepts_extended_frames_and_rejects_others(void)
@@ -135,8 +190,9 @@ static void test_init_accepts_extended_frames_and_rejects_others(void)
     reset_fake();
     assert(ZdtX42s_Init(&handle) == HAL_OK);
     assert(captured_filter.IdType == FDCAN_EXTENDED_ID);
-    assert(captured_filter.FilterType == FDCAN_FILTER_MASK);
-    assert(captured_filter.FilterID1 == 0U && captured_filter.FilterID2 == 0U);
+    assert(captured_filter.FilterType == FDCAN_FILTER_RANGE);
+    assert(captured_filter.FilterID1 == 0x100U);
+    assert(captured_filter.FilterID2 == 0x4FFU);
     assert(captured_global_filter[0] == FDCAN_REJECT);
     assert(captured_global_filter[1] == FDCAN_REJECT);
     assert(captured_global_filter[2] == FDCAN_REJECT_REMOTE);
@@ -212,18 +268,21 @@ static void test_rx_callback_records_motor_reply(void)
     assert(ZdtX42s_Init(&handle) == HAL_OK);
     fake_rx_header.Identifier = 0x200U;
     fake_rx_header.IdType = FDCAN_EXTENDED_ID;
+    fake_rx_header.RxFrameType = FDCAN_DATA_FRAME;
     fake_rx_header.DataLength = FDCAN_DLC_BYTES_3;
     fake_rx_data[0] = 0xF6U;
     fake_rx_data[1] = 0x02U;
     fake_rx_data[2] = 0x6BU;
 
-    HAL_FDCAN_RxFifo0Callback(&handle, FDCAN_IT_RX_FIFO0_NEW_MESSAGE);
+    fake_tick = 55U;
+    trigger_rx_callback(&handle);
     diagnostics = ZdtX42s_GetDiagnostics();
     assert(diagnostics->rx_frame_count == 1U);
     assert(diagnostics->last_rx_id == 0x200U);
     assert(diagnostics->last_function == 0xF6U);
     assert(diagnostics->last_status == 0x02U);
     assert(diagnostics->motor_reply_count[1] == 1U);
+    assert(diagnostics->last_motor_reply_ms[1] == 55U);
 }
 
 static void test_position_request_and_reply(void)
@@ -243,6 +302,7 @@ static void test_position_request_and_reply(void)
     fake_tick = 125U;
     fake_rx_header.Identifier = 0x400U;
     fake_rx_header.IdType = FDCAN_EXTENDED_ID;
+    fake_rx_header.RxFrameType = FDCAN_DATA_FRAME;
     fake_rx_header.DataLength = FDCAN_DLC_BYTES_7;
     fake_rx_data[0] = 0x36U;
     fake_rx_data[1] = 0x01U;
@@ -251,12 +311,13 @@ static void test_position_request_and_reply(void)
     fake_rx_data[4] = 0x1CU;
     fake_rx_data[5] = 0x19U;
     fake_rx_data[6] = 0x6BU;
-    HAL_FDCAN_RxFifo0Callback(&handle, FDCAN_IT_RX_FIFO0_NEW_MESSAGE);
+    trigger_rx_callback(&handle);
 
     fake_tick = 150U;
     assert(ZdtX42s_GetPosition(4U, &position, &age));
     assert(position == -7193);
     assert(age == 25U);
+    assert(ZdtX42s_GetDiagnostics()->last_position_reply_ms[3] == 125U);
 }
 
 static void test_position_sample_sequence_advances_only_for_valid_reply(void)
@@ -270,6 +331,11 @@ static void test_position_sample_sequence_advances_only_for_valid_reply(void)
     fake_tick = 10U;
     fake_rx_header.Identifier = 0x100U;
     fake_rx_header.IdType = FDCAN_EXTENDED_ID;
+    fake_rx_header.RxFrameType = FDCAN_DATA_FRAME;
+    fake_rx_header.RxFrameType = FDCAN_DATA_FRAME;
+    fake_rx_header.RxFrameType = FDCAN_DATA_FRAME;
+    fake_rx_header.RxFrameType = FDCAN_DATA_FRAME;
+    fake_rx_header.RxFrameType = FDCAN_DATA_FRAME;
     fake_rx_header.DataLength = FDCAN_DLC_BYTES_7;
     fake_rx_data[0] = 0x36U;
     fake_rx_data[1] = 0x00U;
@@ -278,7 +344,7 @@ static void test_position_sample_sequence_advances_only_for_valid_reply(void)
     fake_rx_data[4] = 0x00U;
     fake_rx_data[5] = 0x2AU;
     fake_rx_data[6] = 0x6BU;
-    HAL_FDCAN_RxFifo0Callback(&handle, FDCAN_IT_RX_FIFO0_NEW_MESSAGE);
+    trigger_rx_callback(&handle);
 
     assert(ZdtX42s_GetPositionSample(1U, &sample));
     assert(sample.position_x10_deg == 42);
@@ -287,7 +353,7 @@ static void test_position_sample_sequence_advances_only_for_valid_reply(void)
 
     fake_tick = 11U;
     fake_rx_data[6] = 0x00U;
-    HAL_FDCAN_RxFifo0Callback(&handle, FDCAN_IT_RX_FIFO0_NEW_MESSAGE);
+    trigger_rx_callback(&handle);
     assert(ZdtX42s_GetPositionSample(1U, &sample));
     assert(sample.sequence == 1U);
     assert(sample.timestamp_ms == 10U);
@@ -305,6 +371,7 @@ static void test_position_sample_retries_after_interrupted_read(void)
     fake_tick = 10U;
     fake_rx_header.Identifier = 0x100U;
     fake_rx_header.IdType = FDCAN_EXTENDED_ID;
+    fake_rx_header.RxFrameType = FDCAN_DATA_FRAME;
     fake_rx_header.DataLength = FDCAN_DLC_BYTES_7;
     fake_rx_data[0] = 0x36U;
     fake_rx_data[1] = 0x00U;
@@ -313,7 +380,7 @@ static void test_position_sample_retries_after_interrupted_read(void)
     fake_rx_data[4] = 0x00U;
     fake_rx_data[5] = 0x2AU;
     fake_rx_data[6] = 0x6BU;
-    HAL_FDCAN_RxFifo0Callback(&handle, FDCAN_IT_RX_FIFO0_NEW_MESSAGE);
+    trigger_rx_callback(&handle);
 
     fake_tick = 11U;
     fake_rx_data[5] = 0x63U;
@@ -322,6 +389,86 @@ static void test_position_sample_retries_after_interrupted_read(void)
     assert(sample.position_x10_deg == 99);
     assert(sample.timestamp_ms == 11U);
     assert(sample.sequence == 2U);
+}
+
+static void trigger_queued_rx_callback(FDCAN_HandleTypeDef *handle)
+{
+    HAL_FDCAN_RxFifo0Callback(handle, FDCAN_IT_RX_FIFO0_NEW_MESSAGE);
+}
+
+static void test_rx_callback_drains_all_queued_frames(void)
+{
+    FDCAN_HandleTypeDef handle = {0};
+    FDCAN_RxHeaderTypeDef header = {0};
+    uint8_t first_data[8] = {0x36U, 0x00U, 0x00U, 0x00U,
+                             0x00U, 0x2AU, 0x6BU, 0x00U};
+    uint8_t second_data[8] = {0x36U, 0x00U, 0x00U, 0x00U,
+                              0x00U, 0x2BU, 0x6BU, 0x00U};
+    const volatile ZdtX42sDiagnostics *diagnostics;
+
+    reset_fake();
+    assert(ZdtX42s_Init(&handle) == HAL_OK);
+    header.IdType = FDCAN_EXTENDED_ID;
+    header.RxFrameType = FDCAN_DATA_FRAME;
+    header.DataLength = FDCAN_DLC_BYTES_7;
+    header.Identifier = 0x100U;
+    enqueue_rx_frame(&header, first_data);
+    header.Identifier = 0x200U;
+    enqueue_rx_frame(&header, second_data);
+
+    trigger_queued_rx_callback(&handle);
+    diagnostics = ZdtX42s_GetDiagnostics();
+    assert(diagnostics->rx_frame_count == 2U);
+    assert(diagnostics->motor_reply_count[0] == 1U);
+    assert(diagnostics->motor_reply_count[1] == 1U);
+}
+
+static void test_invalid_frames_do_not_count_as_motor_replies(void)
+{
+    FDCAN_HandleTypeDef handle = {0};
+    const volatile ZdtX42sDiagnostics *diagnostics;
+
+    reset_fake();
+    assert(ZdtX42s_Init(&handle) == HAL_OK);
+    fake_rx_header.Identifier = 0x100U;
+    fake_rx_header.IdType = FDCAN_EXTENDED_ID;
+    fake_rx_header.RxFrameType = FDCAN_DATA_FRAME;
+    fake_rx_header.DataLength = FDCAN_DLC_BYTES_7;
+    fake_rx_data[0] = 0x36U;
+    fake_rx_data[6] = 0x00U;
+    trigger_rx_callback(&handle);
+
+    fake_rx_header.RxFrameType = FDCAN_REMOTE_FRAME;
+    fake_rx_header.DataLength = FDCAN_DLC_BYTES_3;
+    fake_rx_data[0] = 0xF6U;
+    fake_rx_data[2] = 0x6BU;
+    trigger_rx_callback(&handle);
+
+    fake_rx_header.RxFrameType = FDCAN_DATA_FRAME;
+    fake_rx_header.Identifier = 0x101U;
+    trigger_rx_callback(&handle);
+
+    fake_rx_header.Identifier = 0x100U;
+    fake_rx_header.DataLength = FDCAN_DLC_BYTES_3;
+    fake_rx_data[0] = 0x36U;
+    trigger_rx_callback(&handle);
+
+    fake_rx_header.DataLength = FDCAN_DLC_BYTES_7;
+    fake_rx_data[0] = 0xAAU;
+    trigger_rx_callback(&handle);
+
+    HAL_FDCAN_RxFifo0Callback(&handle,
+                              FDCAN_IT_RX_FIFO0_FULL |
+                                  FDCAN_IT_RX_FIFO0_MESSAGE_LOST);
+
+    diagnostics = ZdtX42s_GetDiagnostics();
+    assert(diagnostics->motor_reply_count[0] == 0U);
+    assert(diagnostics->invalid_tail_count == 1U);
+    assert(diagnostics->invalid_dlc_count == 1U);
+    assert(diagnostics->invalid_frame_count == 2U);
+    assert(diagnostics->unknown_function_count == 1U);
+    assert(diagnostics->rx_fifo_full_count == 1U);
+    assert(diagnostics->rx_fifo_lost_count == 1U);
 }
 
 int main(void)
@@ -335,6 +482,8 @@ int main(void)
     test_position_request_and_reply();
     test_position_sample_sequence_advances_only_for_valid_reply();
     test_position_sample_retries_after_interrupted_read();
+    test_rx_callback_drains_all_queued_frames();
+    test_invalid_frames_do_not_count_as_motor_replies();
     puts("ZDT CAN driver tests passed");
     return 0;
 }
