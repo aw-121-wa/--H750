@@ -7,7 +7,11 @@
 typedef struct
 {
     uint8_t motor_valid_mask;
+    uint8_t last_missing_mask;
     uint32_t oldest_sample_age_ms;
+    uint32_t sample_timeout_count;
+    uint32_t incomplete_sample_count;
+    uint32_t sample_span_reject_count;
     bool synchronized_sample_valid;
     bool unreasonable_jump;
 } LocalizationServiceStatus;
